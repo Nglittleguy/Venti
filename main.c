@@ -1,3 +1,5 @@
+//FROM examples/ble_peripheral/ble_app_uart/pca10056/s140/ses
+
 /**
  * Copyright (c) 2014 - 2021, Nordic Semiconductor ASA
  *
