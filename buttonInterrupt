@@ -1,0 +1,64 @@
+//FROM examples/peripheral/pin_change_int/pca10056/blank/ses
+
+#include <stdbool.h>
+#include "nrf.h"
+#include "nrf_drv_gpiote.h"
+#include "app_error.h"
+#include "boards.h"
+
+void input1(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t aciton) {
+    bsp_board_led_invert(0);
+}
+
+void input2(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t aciton) {
+    bsp_board_led_invert(1);
+}
+
+void input3(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t aciton) {
+    bsp_board_led_invert(2);
+}
+
+void input4(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t aciton) {
+    bsp_board_led_invert(3);
+}
+
+int gpio_init() {
+    ret_code_t err_code;  //hold error value
+
+    err_code = nrf_drv_gpiote_init();   //for gpioe error check debug
+    APP_ERROR_CHECK(err_code);
+
+    //set gpio for buttons (pin pullup, so on is low)
+    //nrf_gpio_cfg_input(BUTTON_1, NRF_GPIO_PIN_PULLUP);
+    //nrf_gpio_cfg_input(BUTTON_2, NRF_GPIO_PIN_PULLUP);
+    //nrf_gpio_cfg_input(BUTTON_3, NRF_GPIO_PIN_PULLUP);
+    //nrf_gpio_cfg_input(BUTTON_4, NRF_GPIO_PIN_PULLUP);
+
+    nrf_drv_gpiote_in_config_t in_config = GPIOTE_CONFIG_IN_SENSE_HITOLO(true); //uses accurate clock, not in bluetooth chip
+    in_config.pull = NRF_GPIO_PIN_PULLUP;
+
+    err_code = nrf_drv_gpiote_in_init(BUTTON_1, &in_config, input1);
+    err_code = nrf_drv_gpiote_in_init(BUTTON_2, &in_config, input2);
+    err_code = nrf_drv_gpiote_in_init(BUTTON_3, &in_config, input3);
+    err_code = nrf_drv_gpiote_in_init(BUTTON_4, &in_config, input4);
+    APP_ERROR_CHECK(err_code);
+
+    nrf_drv_gpiote_in_event_enable(BUTTON_1, true);
+    nrf_drv_gpiote_in_event_enable(BUTTON_2, true);
+    nrf_drv_gpiote_in_event_enable(BUTTON_3, true);
+    nrf_drv_gpiote_in_event_enable(BUTTON_4, true);
+}
+
+/**
+ * @brief Function for application main entry.
+ */
+int main(void)
+{
+    bsp_board_init(BSP_INIT_LEDS);
+    gpio_init();
+
+    while (true)
+    {
+        // Do nothing.
+    }
+}
