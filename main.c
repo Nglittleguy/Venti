@@ -1,5 +1,3 @@
-//FROM examples/ble_peripheral/ble_app_uart/pca10056/s140/ses
-
 /**
  * Copyright (c) 2014 - 2021, Nordic Semiconductor ASA
  *
@@ -71,6 +69,13 @@
 #include "bsp_btn_ble.h"
 #include "nrf_pwr_mgmt.h"
 
+/*TESTING*/
+#include "nrf_delay.h"
+#include <stdio.h>
+//#include "nrf_drv_gpiote.h"
+//#include "app_error.h"
+//#include "boards.h"
+
 #if defined (UART_PRESENT)
 #include "nrf_uart.h"
 #endif
@@ -133,6 +138,67 @@ static void flipLights(bool turnOn) {
     lights = turnOn;
   }
 }
+
+static bool cw_seq[8][4] = {
+    {1,0,0,0},
+    {1,1,0,0},
+    {0,1,0,0},
+    {0,1,1,0},
+    {0,0,1,0},
+    {0,0,1,1},
+    {0,0,0,1},
+    {1,0,0,1},
+  };
+
+static bool ccw_seq[8][4] = {
+    {1,0,0,1},
+    {0,0,0,1},
+    {0,0,1,1},
+    {0,0,1,0},
+    {0,1,1,0},
+    {0,1,0,0},
+    {1,1,0,0},
+    {1,0,0,0},
+  };
+
+#define STEPCOUNT 2048
+#define STEPDELAY 10
+
+static void bsp_board_motor_init(void) {
+    for(int i = 0; i<4; i++) {
+        nrf_gpio_cfg_output(11+i);
+    }
+}
+
+static void rotateCW() {
+    for(int step = 0; step<STEPCOUNT; step++) {
+        
+        for(int pinI = 0; pinI < 4; pinI++) {
+            if(cw_seq[step%8][pinI])
+                nrf_gpio_pin_set(11+pinI);
+            else 
+                nrf_gpio_pin_clear(11+pinI);
+        }
+        NRF_LOG_INFO("CW\n");
+        nrf_delay_ms(STEPDELAY);
+    }
+}
+
+static void rotateCCW() {
+    for(int step = 0; step<STEPCOUNT; step++) {
+        
+        for(int pinI = 0; pinI < 4; pinI++) {
+
+            if(ccw_seq[step%8][pinI])
+                nrf_gpio_pin_set(11+pinI);
+            else 
+                nrf_gpio_pin_clear(11+pinI);
+        }
+         NRF_LOG_INFO("CCW\n");
+         nrf_delay_ms(STEPDELAY);
+    }
+}
+
 
 /************************************************************
 END OF TESTING
@@ -232,6 +298,16 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
         else if(p_evt->params.rx_data.length==3) {
           if(p_evt->params.rx_data.p_data[0]=='o' && p_evt->params.rx_data.p_data[1]=='f' && p_evt->params.rx_data.p_data[2]=='f') {
             flipLights(false);
+          }
+        }
+        else if(p_evt->params.rx_data.length==4) {
+          if(p_evt->params.rx_data.p_data[0]=='l' && p_evt->params.rx_data.p_data[1]=='e' && p_evt->params.rx_data.p_data[2]=='f' && p_evt->params.rx_data.p_data[3]=='t') {
+             rotateCCW();
+          }
+        }
+        else if(p_evt->params.rx_data.length==5) {
+          if(p_evt->params.rx_data.p_data[0]=='r' && p_evt->params.rx_data.p_data[1]=='i' && p_evt->params.rx_data.p_data[2]=='g' && p_evt->params.rx_data.p_data[3]=='h' && p_evt->params.rx_data.p_data[4]=='t') {
+            rotateCW();
           }
         }
         //END TESTING
@@ -513,6 +589,7 @@ void gatt_init(void)
 void bsp_event_handler(bsp_event_t event)
 {
     uint32_t err_code;
+    NRF_LOG_INFO("Button happened\n");
     switch (event)
     {
         case BSP_EVENT_SLEEP:
@@ -537,11 +614,122 @@ void bsp_event_handler(bsp_event_t event)
                 }
             }
             break;
+        //TESTING
+
+        /*
+         static uint8_t data_array[BLE_NUS_MAX_DATA_LEN];
+         static uint8_t index = 0;
+        */
+        case BSP_EVENT_KEY_0:
+            NRF_LOG_INFO("1 pressed\n");
+            do {
+              uint8_t data_array[10] = "1 pressed\n";
+              uint16_t length = (uint16_t)10;
+              err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
+              if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+              {
+                APP_ERROR_CHECK(err_code);
+              }
+           } while (err_code == NRF_ERROR_RESOURCES);
+        break;          
+        case BSP_EVENT_KEY_1:
+            NRF_LOG_INFO("2 pressed\n");
+            do {
+              uint8_t data_array[10] = "2 pressed\n";
+              uint16_t length = (uint16_t)10;
+              err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
+              if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+              {
+                APP_ERROR_CHECK(err_code);
+              }
+           } while (err_code == NRF_ERROR_RESOURCES);
+        break;                  
+        case BSP_EVENT_KEY_2:
+         NRF_LOG_INFO("3 pressed\n");
+            do {
+              uint8_t data_array[10] = "3 pressed\n";
+              uint16_t length = (uint16_t)10;
+              err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
+              if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+              {
+                APP_ERROR_CHECK(err_code);
+              }
+            } while (err_code == NRF_ERROR_RESOURCES);
+        break;
+        case BSP_EVENT_KEY_3:
+         NRF_LOG_INFO("4 pressed\n");
+            do {
+              uint8_t data_array[10] = "4 pressed\n";
+              uint16_t length = (uint16_t)10;
+              err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
+              if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+              {
+                APP_ERROR_CHECK(err_code);
+              }
+            } while (err_code == NRF_ERROR_RESOURCES);
+        break;
+
+        //END TESTING
 
         default:
             break;
     }
 }
+
+/* TESTING ***************************/
+//void input1(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t aciton) {
+    
+
+//    //NRF_LOG_DEBUG("Ready to send data over BLE NUS");
+//    //NRF_LOG_HEXDUMP_DEBUG(data_array, index);
+//    uint32_t err_code;
+//    static uint8_t data_array[BLE_NUS_MAX_DATA_LEN] = "one\n";
+
+
+//    do {
+//      uint16_t length = (uint16_t)4;
+
+//      err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
+//      if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND)) {
+//          APP_ERROR_CHECK(err_code);
+//      }
+//    } while (err_code == NRF_ERROR_RESOURCES);
+//}
+
+//void input2(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t aciton) {
+//    bsp_board_led_invert(1);
+//}
+
+//void input3(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t aciton) {
+//    bsp_board_led_invert(2);
+//}
+
+//void input4(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t aciton) {
+//    bsp_board_led_invert(3);
+//}
+
+//int my_button_init() {
+//    uint32_t err_code;  //hold error value
+
+//    err_code = nrf_drv_gpiote_init();   //for gpioe error check debug
+//    //APP_ERROR_CHECK(err_code);
+
+//    nrf_drv_gpiote_in_config_t in_config = GPIOTE_CONFIG_IN_SENSE_HITOLO(true); //uses accurate clock, not in bluetooth chip
+//    in_config.pull = NRF_GPIO_PIN_PULLUP;
+
+//    err_code = nrf_drv_gpiote_in_init(BUTTON_1, &in_config, input1);
+//    err_code = nrf_drv_gpiote_in_init(BUTTON_2, &in_config, input2);
+//    err_code = nrf_drv_gpiote_in_init(BUTTON_3, &in_config, input3);
+//    err_code = nrf_drv_gpiote_in_init(BUTTON_4, &in_config, input4);
+//    //APP_ERROR_CHECK(err_code);
+
+//    nrf_drv_gpiote_in_event_enable(BUTTON_1, true);
+//    nrf_drv_gpiote_in_event_enable(BUTTON_2, true);
+//    nrf_drv_gpiote_in_event_enable(BUTTON_3, true);
+//    nrf_drv_gpiote_in_event_enable(BUTTON_4, true);
+//}
+
+/*END TESTING*************************/
 
 
 /**@brief   Function for handling app_uart events.
@@ -571,7 +759,7 @@ void uart_event_handle(app_uart_evt_t * p_event)
                 {
                     NRF_LOG_DEBUG("Ready to send data over BLE NUS");
                     NRF_LOG_HEXDUMP_DEBUG(data_array, index);
-
+                    
                     do
                     {
                         uint16_t length = (uint16_t)index;
@@ -743,15 +931,21 @@ int main(void)
     services_init();
     advertising_init();
     conn_params_init();
+    bsp_board_motor_init();
+
+    //Testing Init Button
+    //my_button_init();
 
     // Start execution.
     printf("\r\nUART started.\r\n");
     NRF_LOG_INFO("Debug logging for UART over RTT started.");
+    NRF_LOG_INFO("Here working on stuff\n");
     advertising_start();
 
     // Enter main loop.
     for (;;)
     {
+        
         idle_state_handle();
     }
 }
