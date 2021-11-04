@@ -139,63 +139,67 @@ static void flipLights(bool turnOn) {
   }
 }
 
-static bool cw_seq[8][4] = {
-    {1,0,0,0},
-    {1,1,0,0},
-    {0,1,0,0},
-    {0,1,1,0},
-    {0,0,1,0},
-    {0,0,1,1},
-    {0,0,0,1},
-    {1,0,0,1},
-  };
+static bool motor_reset[4] = {1,0,0,1};
 
-static bool ccw_seq[8][4] = {
-    {1,0,0,1},
-    {0,0,0,1},
-    {0,0,1,1},
-    {0,0,1,0},
-    {0,1,1,0},
-    {0,1,0,0},
-    {1,1,0,0},
-    {1,0,0,0},
-  };
+static bool cw_seq[4][4] = {
+    {1, 0, 0, 1},
+    {1, 1, 0, 0},
+    {0, 1, 1, 0},
+    {0, 0, 1, 1},
+};
 
-#define STEPCOUNT 2048
+static bool ccw_seq[4][4] = {
+    {1, 0, 0, 1},
+    {0, 0, 1, 1},
+    {0, 1, 1, 0},
+    {1, 1, 0, 0}
+};
+
+#define STEPCOUNT 1024
 #define STEPDELAY 10
+#define MOTORBASEPIN 11
 
 static void bsp_board_motor_init(void) {
     for(int i = 0; i<4; i++) {
-        nrf_gpio_cfg_output(11+i);
+        nrf_gpio_cfg_output(MOTORBASEPIN+i);
+    }
+}
+
+static void reset_motor() {
+    //Set the motor to the same start state
+    for(int pinI = 0; pinI < 4; pinI++) {
+        if(motor_reset[pinI])
+           nrf_gpio_pin_set(MOTORBASEPIN+pinI);
+        else 
+           nrf_gpio_pin_clear(MOTORBASEPIN+pinI);
     }
 }
 
 static void rotateCW() {
+    reset_motor();
     for(int step = 0; step<STEPCOUNT; step++) {
-        
         for(int pinI = 0; pinI < 4; pinI++) {
-            if(cw_seq[step%8][pinI])
-                nrf_gpio_pin_set(11+pinI);
+            if(cw_seq[step%4][pinI])
+                nrf_gpio_pin_set(MOTORBASEPIN+pinI);
             else 
-                nrf_gpio_pin_clear(11+pinI);
+                nrf_gpio_pin_clear(MOTORBASEPIN+pinI);
         }
-        NRF_LOG_INFO("CW\n");
         nrf_delay_ms(STEPDELAY);
     }
 }
 
 static void rotateCCW() {
+    reset_motor();
     for(int step = 0; step<STEPCOUNT; step++) {
-        
-        for(int pinI = 0; pinI < 4; pinI++) {
 
-            if(ccw_seq[step%8][pinI])
-                nrf_gpio_pin_set(11+pinI);
+    //The CCW pattern must be set backwards... for some reason
+        for(int pinI = 3; pinI > 0; pinI--) {
+            if(ccw_seq[step%4][pinI])
+                nrf_gpio_pin_set(MOTORBASEPIN+pinI);
             else 
-                nrf_gpio_pin_clear(11+pinI);
+                nrf_gpio_pin_clear(MOTORBASEPIN+pinI);
         }
-         NRF_LOG_INFO("CCW\n");
-         nrf_delay_ms(STEPDELAY);
+        nrf_delay_ms(STEPDELAY);
     }
 }
 
