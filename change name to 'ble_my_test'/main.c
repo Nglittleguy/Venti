@@ -32,15 +32,125 @@
 
 //****************************************** Mine
 #include "ble_bas.h"
-#include "services/led_service.h"
+#include "Services/led_service.h"
 #include "Battery Level/battery_voltage.h"
+
+#include "nrf_delay.h"
+#include "ble_nus.h"
+#include "app_uart.h"
+#include "app_util_platform.h"
+
+#if defined (UART_PRESENT)
+#include "nrf_uart.h"
+#endif
+#if defined (UARTE_PRESENT)
+#include "nrf_uarte.h"
+#endif
+
+
+#define NUS_SERVICE_UUID_TYPE           BLE_UUID_TYPE_VENDOR_BEGIN                  /**< UUID type for the Nordic UART Service (vendor specific). */
+#define UART_TX_BUF_SIZE                256                                         /**< UART TX buffer size. */
+#define UART_RX_BUF_SIZE                256                                         /**< UART RX buffer size. */
+
+
+BLE_NUS_DEF(m_nus, NRF_SDH_BLE_TOTAL_LINK_COUNT);                                   /**< BLE NUS service instance. */
+
+static uint16_t   m_ble_nus_max_data_len = BLE_GATT_ATT_MTU_DEFAULT - 3;            /**< Maximum length of data (in bytes) that can be transmitted to the peer by the Nordic UART service module. */
 
 #define LIGHTBULB_LED                   BSP_BOARD_LED_1
 BLE_BAS_DEF(m_bas);
 BLE_LED_SERVICE_DEF(m_led_service);
 
 APP_TIMER_DEF(m_battery_timer_id);
-#define BATTERY_LEVEL_MEAS_INTERVAL     APP_TIMER_TICKS(120000)   
+#define BATTERY_LEVEL_MEAS_INTERVAL     APP_TIMER_TICKS(300000)       //120000
+
+
+#define BLINK_LED                       BSP_BOARD_LED_3
+APP_TIMER_DEF(m_led_blink_id);
+#define LED_BLINK_INTERVAL              APP_TIMER_TICKS(5000)
+
+
+bool lights = false;
+
+char data_read[32];
+
+static void flipLights(bool turnOn);
+
+static const bool motor_reset[4] = {1,0,0,1};
+
+static const bool cw_seq[4][4] = {
+    {1, 0, 0, 1},
+    {1, 1, 0, 0},
+    {0, 1, 1, 0},
+    {0, 0, 1, 1},
+};
+
+static const bool ccw_seq[4][4] = {
+    {1, 0, 0, 1},
+    {0, 0, 1, 1},
+    {0, 1, 1, 0},
+    {1, 1, 0, 0}
+};
+
+#define STEPCOUNT 1024
+#define STEPDELAY 10
+#define MOTORBASEPIN 11
+
+static void flipLights(bool turnOn) {
+  if(lights != turnOn) {
+    for(int i = 1; i<4; i++) {
+      bsp_board_led_invert(i);
+    }
+    lights = turnOn;
+  }
+}
+
+static void bsp_board_motor_init(void) {
+    for(int i = 0; i<4; i++) {
+        nrf_gpio_cfg_output(MOTORBASEPIN+i);
+    }
+}
+
+static void reset_motor() {
+    //Set the motor to the same start state
+    for(int pinI = 0; pinI < 4; pinI++) {
+        if(motor_reset[pinI])
+           nrf_gpio_pin_set(MOTORBASEPIN+pinI);
+        else 
+           nrf_gpio_pin_clear(MOTORBASEPIN+pinI);
+    }
+}
+
+static void rotateCW() {
+    reset_motor();
+    for(int step = 0; step<STEPCOUNT; step++) {
+        for(int pinI = 0; pinI < 4; pinI++) {
+            if(cw_seq[step%4][pinI])
+                nrf_gpio_pin_set(MOTORBASEPIN+pinI);
+            else 
+                nrf_gpio_pin_clear(MOTORBASEPIN+pinI);
+        }
+        nrf_delay_ms(STEPDELAY);
+    }
+}
+
+static void rotateCCW() {
+    reset_motor();
+    for(int step = 0; step<STEPCOUNT; step++) {
+
+    //The CCW pattern must be set backwards... for some reason
+        for(int pinI = 3; pinI > 0; pinI--) {
+            if(ccw_seq[step%4][pinI])
+                nrf_gpio_pin_set(MOTORBASEPIN+pinI);
+            else 
+                nrf_gpio_pin_clear(MOTORBASEPIN+pinI);
+        }
+        nrf_delay_ms(STEPDELAY);
+    }
+}
+
+
+ //COMMENTED STUFF AWAY IN BSP.C TO REMOVE FLASHING LIGHT FOR TESTING
 //******************************************
 
 
@@ -49,7 +159,7 @@ APP_TIMER_DEF(m_battery_timer_id);
 #define MANUFACTURER_NAME               "NordicSemiconductor"                   /**< Manufacturer. Will be passed to Device Information Service. */
 #define APP_ADV_INTERVAL                300                                     /**< The advertising interval (in units of 0.625 ms. This value corresponds to 187.5 ms). */
 
-#define APP_ADV_DURATION                18000                                   /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
+#define APP_ADV_DURATION                0 //Continue advertising (18000 default)        /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
 #define APP_BLE_OBSERVER_PRIO           3                                       /**< Application's BLE observer priority. You shouldn't need to modify this value. */
 #define APP_BLE_CONN_CFG_TAG            1                                       /**< A tag identifying the SoftDevice BLE configuration. */
 
@@ -147,14 +257,25 @@ static void led_write_handler(uint16_t conn_hanlde, ble_led_service_t * p_led_se
     if(led_state)
     {
         bsp_board_led_on(LIGHTBULB_LED);
-        printf("Received LED on!");
+        NRF_LOG_INFO("Received LED on!\n");
     }
     else 
     {
         bsp_board_led_off(LIGHTBULB_LED);
-        printf("Recieved LED off!");
+        NRF_LOG_INFO("Recieved LED off!\n");
     }
 }
+
+static void led_blink_timeout_handler(void * p_context)
+{
+    UNUSED_PARAMETER(p_context);
+    NRF_LOG_INFO("LED Blink\n");
+    bsp_board_led_on(BLINK_LED);
+    nrf_delay_ms(1000);
+    bsp_board_led_off(BLINK_LED);
+}
+
+
 
 /**@brief Function for the Timer initialization.
  *
@@ -168,6 +289,10 @@ static void timers_init(void)
 
     err_code = app_timer_create(&m_battery_timer_id, APP_TIMER_MODE_REPEATED, battery_level_meas_timeout_handler);
     APP_ERROR_CHECK(err_code);
+
+    err_code = app_timer_create(&m_led_blink_id, APP_TIMER_MODE_REPEATED, led_blink_timeout_handler);
+    APP_ERROR_CHECK(err_code);
+
     // Create timers.
 
     /* YOUR_JOB: Create any timers to be used by the application.
@@ -214,11 +339,29 @@ static void gap_params_init(void)
 }
 
 
+
+/**@brief Function for handling events from the GATT library. */
+void gatt_evt_handler(nrf_ble_gatt_t * p_gatt, nrf_ble_gatt_evt_t const * p_evt)
+{
+    if ((m_conn_handle == p_evt->conn_handle) && (p_evt->evt_id == NRF_BLE_GATT_EVT_ATT_MTU_UPDATED))
+    {
+        m_ble_nus_max_data_len = p_evt->params.att_mtu_effective - OPCODE_LENGTH - HANDLE_LENGTH;
+        NRF_LOG_INFO("Data len is set to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
+    }
+    NRF_LOG_DEBUG("ATT MTU exchange completed. central 0x%x peripheral 0x%x",
+                  p_gatt->att_mtu_desired_central,
+                  p_gatt->att_mtu_desired_periph);
+}
+
+
 /**@brief Function for initializing the GATT module.
  */
 static void gatt_init(void)
 {
-    ret_code_t err_code = nrf_ble_gatt_init(&m_gatt, NULL);
+    ret_code_t err_code = nrf_ble_gatt_init(&m_gatt, gatt_evt_handler);
+    APP_ERROR_CHECK(err_code);
+
+    err_code = nrf_ble_gatt_att_mtu_periph_set(&m_gatt, NRF_SDH_BLE_GATT_MAX_MTU_SIZE);
     APP_ERROR_CHECK(err_code);
 }
 
@@ -234,6 +377,157 @@ static void nrf_qwr_error_handler(uint32_t nrf_error)
 {
     APP_ERROR_HANDLER(nrf_error);
 }
+
+/**@brief   Function for handling app_uart events.
+ *
+ * @details This function will receive a single character from the app_uart module and append it to
+ *          a string. The string will be be sent over BLE when the last character received was a
+ *          'new line' '\n' (hex 0x0A) or if the string has reached the maximum data length.
+ */
+/**@snippet [Handling the data received over UART] */
+void uart_event_handle(app_uart_evt_t * p_event)
+{
+    static uint8_t data_array[BLE_NUS_MAX_DATA_LEN];
+    static uint8_t index = 0;
+    uint32_t       err_code;
+
+    switch (p_event->evt_type)
+    {
+        case APP_UART_DATA_READY:
+            UNUSED_VARIABLE(app_uart_get(&data_array[index]));
+            index++;
+
+            if ((data_array[index - 1] == '\n') ||
+                (data_array[index - 1] == '\r') ||
+                (index >= m_ble_nus_max_data_len))
+            {
+                if (index > 1)
+                {
+                    NRF_LOG_DEBUG("Ready to send data over BLE NUS");
+                    NRF_LOG_HEXDUMP_DEBUG(data_array, index);
+                    
+                    do
+                    {
+                        uint16_t length = (uint16_t)index;
+                        err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
+                        if ((err_code != NRF_ERROR_INVALID_STATE) &&
+                            (err_code != NRF_ERROR_RESOURCES) &&
+                            (err_code != NRF_ERROR_NOT_FOUND))
+                        {
+                            APP_ERROR_CHECK(err_code);
+                        }
+                    } while (err_code == NRF_ERROR_RESOURCES);
+                }
+
+                index = 0;
+            }
+            break;
+
+        case APP_UART_COMMUNICATION_ERROR:
+            APP_ERROR_HANDLER(p_event->data.error_communication);
+            break;
+
+        case APP_UART_FIFO_ERROR:
+            APP_ERROR_HANDLER(p_event->data.error_code);
+            break;
+
+        default:
+            break;
+    }
+}
+/**@snippet [Handling the data received over UART] */
+
+/**@brief  Function for initializing the UART module.
+ */
+/**@snippet [UART Initialization] */
+static void uart_init(void)
+{
+    uint32_t                     err_code;
+    app_uart_comm_params_t const comm_params =
+    {
+        .rx_pin_no    = RX_PIN_NUMBER,
+        .tx_pin_no    = TX_PIN_NUMBER,
+        .rts_pin_no   = RTS_PIN_NUMBER,
+        .cts_pin_no   = CTS_PIN_NUMBER,
+        .flow_control = APP_UART_FLOW_CONTROL_DISABLED,
+        .use_parity   = false,
+#if defined (UART_PRESENT)
+        .baud_rate    = NRF_UART_BAUDRATE_115200
+#else
+        .baud_rate    = NRF_UARTE_BAUDRATE_115200
+#endif
+    };
+
+    APP_UART_FIFO_INIT(&comm_params,
+                       UART_RX_BUF_SIZE,
+                       UART_TX_BUF_SIZE,
+                       uart_event_handle,
+                       APP_IRQ_PRIORITY_LOWEST,
+                       err_code);
+    APP_ERROR_CHECK(err_code);
+}
+/**@snippet [UART Initialization] */
+
+
+/**@brief Function for handling the data from the Nordic UART Service.
+ *
+ * @details This function will process the data received from the Nordic UART BLE Service and send
+ *          it to the UART module.
+ *
+ * @param[in] p_evt       Nordic UART Service event.
+ */
+/**@snippet [Handling the data received over BLE] */
+static void nus_data_handler(ble_nus_evt_t * p_evt)
+{
+
+    if (p_evt->type == BLE_NUS_EVT_RX_DATA)
+    {
+        uint32_t err_code;
+        NRF_LOG_DEBUG("Received data from BLE NUS. Writing data on UART.");
+        NRF_LOG_HEXDUMP_DEBUG(p_evt->params.rx_data.p_data, p_evt->params.rx_data.length);
+
+        memset(data_read, '\0', 32);
+        for (uint32_t i = 0; i < p_evt->params.rx_data.length && i < 32; i++) {
+          data_read[i] = p_evt->params.rx_data.p_data[i];
+        }
+
+        if(strcmp(data_read, "on")==0) {
+          flipLights(true);
+        }
+        else if(strcmp(data_read, "off")==0) {
+          flipLights(false);
+        }
+        else if(strcmp(data_read, "left")==0) {
+          rotateCCW();
+        }
+        else if(strcmp(data_read, "right")==0) {
+          rotateCW();
+        }
+
+
+        //Don't actually need to output to UART, just read in
+        /*
+        for (uint32_t i = 0; i < p_evt->params.rx_data.length; i++)
+        {
+            do
+            {
+                err_code = app_uart_put(p_evt->params.rx_data.p_data[i]);
+                if ((err_code != NRF_SUCCESS) && (err_code != NRF_ERROR_BUSY))
+                {
+                    NRF_LOG_ERROR("Failed receiving NUS message. Error 0x%x. ", err_code);
+                    APP_ERROR_CHECK(err_code);
+                }
+            } while (err_code == NRF_ERROR_BUSY);
+        }
+        if (p_evt->params.rx_data.p_data[p_evt->params.rx_data.length - 1] == '\r')
+        {
+            while (app_uart_put('\n') == NRF_ERROR_BUSY);
+        }
+        */
+    }
+
+}
+/**@snippet [Handling the data received over BLE] */
 
 
 /**@brief Function for handling the YYY Service events.
@@ -269,7 +563,7 @@ static void services_init(void)
     uint32_t         err_code;
     ble_bas_init_t          bas_init;
     ble_led_service_init_t  led_init;
-
+    ble_nus_init_t     nus_init;
 
     nrf_ble_qwr_init_t qwr_init = {0};
 
@@ -304,6 +598,13 @@ static void services_init(void)
     bas_init.initial_batt_level = 100;
 
     err_code = ble_bas_init(&m_bas, &bas_init);
+    APP_ERROR_CHECK(err_code);
+
+
+    //Initialize UART/NUS
+    memset(&nus_init, 0, sizeof(nus_init));
+    nus_init.data_handler = nus_data_handler;
+    err_code = ble_nus_init(&m_nus, &nus_init);
     APP_ERROR_CHECK(err_code);
 
 
@@ -398,6 +699,9 @@ static void application_timers_start(void)
     uint32_t err_code;
     err_code = app_timer_start(m_battery_timer_id, BATTERY_LEVEL_MEAS_INTERVAL, NULL);
     APP_ERROR_CHECK(err_code);
+
+    err_code = app_timer_start(m_led_blink_id,LED_BLINK_INTERVAL, NULL);
+    APP_ERROR_CHECK(err_code);
 }
 
 
@@ -487,6 +791,20 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             APP_ERROR_CHECK(err_code);
         } break;
 
+        case BLE_GAP_EVT_SEC_PARAMS_REQUEST:
+            // Pairing not supported
+            NRF_LOG_DEBUG("GAP Event Parameters Pairing Not Supported.");
+            err_code = sd_ble_gap_sec_params_reply(m_conn_handle, BLE_GAP_SEC_STATUS_PAIRING_NOT_SUPP, NULL, NULL);
+            APP_ERROR_CHECK(err_code);
+            break;
+
+        case BLE_GATTS_EVT_SYS_ATTR_MISSING:
+            // No system attributes have been stored.
+            NRF_LOG_DEBUG("GATT Event System Attribute Missing.");
+            err_code = sd_ble_gatts_sys_attr_set(m_conn_handle, NULL, 0, 0);
+            APP_ERROR_CHECK(err_code);
+            break;
+
         case BLE_GATTC_EVT_TIMEOUT:
             // Disconnect on GATT Client timeout event.
             NRF_LOG_DEBUG("GATT Client Timeout.");
@@ -537,7 +855,6 @@ static void ble_stack_init(void)
 
 
 
-
 /**@brief Clear bond information from persistent storage.
  */
 static void delete_bonds(void)
@@ -584,7 +901,43 @@ static void bsp_event_handler(bsp_event_t event)
                 }
             }
             break; // BSP_EVENT_KEY_0
-
+     
+        case BSP_EVENT_KEY_1:
+            NRF_LOG_INFO("2 pressed\n");
+            do {
+              uint8_t data_array[10] = "2 pressed\n";
+              uint16_t length = (uint16_t)10;
+              err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
+              if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+              {
+                APP_ERROR_CHECK(err_code);
+              }
+           } while (err_code == NRF_ERROR_RESOURCES);
+        break;                  
+        case BSP_EVENT_KEY_2:
+         NRF_LOG_INFO("3 pressed\n");
+            do {
+              uint8_t data_array[10] = "3 pressed\n";
+              uint16_t length = (uint16_t)10;
+              err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
+              if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+              {
+                APP_ERROR_CHECK(err_code);
+              }
+            } while (err_code == NRF_ERROR_RESOURCES);
+        break;
+        case BSP_EVENT_KEY_3:
+         NRF_LOG_INFO("4 pressed\n");
+            do {
+              uint8_t data_array[10] = "4 pressed\n";
+              uint16_t length = (uint16_t)10;
+              err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
+              if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+              {
+                APP_ERROR_CHECK(err_code);
+              }
+            } while (err_code == NRF_ERROR_RESOURCES);
+        break;
         default:
             break;
     }
@@ -609,7 +962,6 @@ static void advertising_init(void)
     init.config.ble_adv_fast_enabled  = true;
     init.config.ble_adv_fast_interval = APP_ADV_INTERVAL;
     init.config.ble_adv_fast_timeout  = APP_ADV_DURATION;
-
     init.evt_handler = on_adv_evt;
 
     err_code = ble_advertising_init(&m_advertising, &init);
@@ -618,11 +970,18 @@ static void advertising_init(void)
     ble_advertising_conn_cfg_tag_set(&m_advertising, APP_BLE_CONN_CFG_TAG);
 }
 
-static void leds_init()
+static void leds_init(bool * p_erase_bonds)
 {
+    bsp_event_t startup_event;
+
     ret_code_t err_code;
-    err_code = bsp_init(BSP_INIT_LEDS, bsp_event_handler);
+    err_code = bsp_init(BSP_INIT_LEDS | BSP_INIT_BUTTONS, bsp_event_handler);
     APP_ERROR_CHECK(err_code);
+
+    err_code = bsp_btn_ble_init(NULL, &startup_event);
+    APP_ERROR_CHECK(err_code);
+
+    *p_erase_bonds = (startup_event == BSP_EVENT_CLEAR_BONDING_DATA);
 }
 
 
@@ -681,7 +1040,7 @@ int main(void)
     log_init();
     timers_init();
     battery_voltage_init();
-    leds_init();
+    leds_init(&erase_bonds);
     power_management_init();
     ble_stack_init();
     gap_params_init();
