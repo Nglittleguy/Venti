@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "nordic_common.h"
 #include "nrf.h"
@@ -39,6 +40,82 @@
 #include "ble_nus.h"
 #include "app_uart.h"
 #include "app_util_platform.h"
+
+#include "nrf_fstorage.h"
+#include "nrf_fstorage_sd.h"
+#include "nrf_cli.h"
+#include "nrf_cli_uart.h"
+
+static void fstorage_evt_handler(nrf_fstorage_evt_t * p_evt);
+
+
+NRF_FSTORAGE_DEF(nrf_fstorage_t fstorage) =
+{
+    /* Set a handler for fstorage events. */
+    .evt_handler = fstorage_evt_handler,
+
+    /* These below are the boundaries of the flash space assigned to this instance of fstorage.
+     * You must set these manually, even at runtime, before nrf_fstorage_init() is called.
+     * The function nrf5_flash_end_addr_get() can be used to retrieve the last address on the
+     * last page of flash available to write data. */
+    .start_addr = 0x3e000,
+    .end_addr   = 0x3ffff,
+};
+
+static uint32_t nrf5_flash_end_addr_get()
+{
+    uint32_t const bootloader_addr = BOOTLOADER_ADDRESS;
+    uint32_t const page_sz         = NRF_FICR->CODEPAGESIZE;
+    uint32_t const code_sz         = NRF_FICR->CODESIZE;
+
+    return (bootloader_addr != 0xFFFFFFFF ?
+            bootloader_addr : (code_sz * page_sz));
+}
+
+static void fstorage_evt_handler(nrf_fstorage_evt_t * p_evt)
+{
+    if (p_evt->result != NRF_SUCCESS)
+    {
+        NRF_LOG_INFO("--> Event received: ERROR while executing an fstorage operation.");
+        return;
+    }
+
+    switch (p_evt->id)
+    {
+        case NRF_FSTORAGE_EVT_WRITE_RESULT:
+        {
+            NRF_LOG_INFO("--> Event received: wrote %d bytes at address 0x%x.",
+                         p_evt->len, p_evt->addr);
+        } break;
+
+        case NRF_FSTORAGE_EVT_ERASE_RESULT:
+        {
+            NRF_LOG_INFO("--> Event received: erased %d page from address 0x%x.",
+                         p_evt->len, p_evt->addr);
+        } break;
+
+        default:
+            break;
+    }
+}
+
+static void print_flash_info(nrf_fstorage_t * p_fstorage)
+{
+    NRF_LOG_INFO("========| flash info |========");
+    NRF_LOG_INFO("erase unit: \t%d bytes",      p_fstorage->p_flash_info->erase_unit);
+    NRF_LOG_INFO("program unit: \t%d bytes",    p_fstorage->p_flash_info->program_unit);
+    NRF_LOG_INFO("==============================");
+}
+
+void wait_for_flash_ready(nrf_fstorage_t const * p_fstorage)
+{
+    /* While fstorage is busy, sleep and wait for an event. */
+    while (nrf_fstorage_is_busy(p_fstorage))
+    {
+        sd_app_evt_wait();
+    }
+}
+
 
 #if defined (UART_PRESENT)
 #include "nrf_uart.h"
@@ -147,6 +224,79 @@ static void rotateCCW() {
         }
         nrf_delay_ms(STEPDELAY);
     }
+}
+
+static void resetFlash() {
+    //nrf_nvmc_page_erase(flash_address);
+    ret_code_t err_code = sd_flash_page_erase(112); 
+    APP_ERROR_CHECK(err_code);
+}
+
+static void writeToFlash() {
+    const int words[40] = {1,2,3,4,5,6,7,8,9,1,2,3,4,5,6,7,8,9};
+    //ret_code_t err_code = sd_flash_write(flash_address, &words, 1);
+    //APP_ERROR_CHECK(err_code);
+    //nrf_nvmc_write_words(flash_address, words, 10);   
+}
+
+static void readFromFlash() {
+   // char *read_address = (char*) flash_address;
+
+    //printf("Here it is!!!:");
+
+    //for(int i = 0; i<10; i++) {
+    //  printf("%c", *(read_address+i));
+    //  i++;
+    //}
+}
+
+static void fstorage_test(void) {
+    //printf("Storage Test\r");
+    nrf_fstorage_api_t * p_fs_api = &nrf_fstorage_sd;
+    //NRF_LOG_INFO("Initializing nrf_fstorage_sd implementation...");
+
+    ret_code_t rc;
+    rc = nrf_fstorage_init(&fstorage, p_fs_api, NULL);
+    APP_ERROR_CHECK(rc);
+
+    print_flash_info(&fstorage);
+  
+    
+
+    //(void) nrf5_flash_end_addr_get();
+
+    NRF_LOG_INFO("Clearing flash page.");
+    rc = nrf_fstorage_erase(&fstorage, 0x3f000, 1, NULL);
+    if (rc != NRF_SUCCESS)
+    {
+        NRF_LOG_INFO("nrf_fstorage_erase() returned: %s\n",
+                        nrf_strerror_get(rc));
+    }
+
+    wait_for_flash_ready(&fstorage);
+    NRF_LOG_INFO("Done.");
+
+    static char m_data[] = "hello what's up doc";
+    NRF_LOG_INFO("Writing \"%s\" to flash.", m_data);
+    rc = nrf_fstorage_write(&fstorage, 0x3f000, &m_data, sizeof(m_data), NULL);
+    APP_ERROR_CHECK(rc);
+
+    wait_for_flash_ready(&fstorage);
+    NRF_LOG_INFO("Done.");
+
+    uint8_t    data[256] = {0};
+    /* Read data. */
+    rc = nrf_fstorage_read(&fstorage, 0x3f000, data, sizeof(m_data));
+    if (rc != NRF_SUCCESS)
+    {
+        NRF_LOG_INFO("nrf_fstorage_read() returned: %s\n",nrf_strerror_get(rc));
+        return;
+    }
+    
+    for(int i = 0; i<sizeof(m_data); i++) {
+      NRF_LOG_INFO("fstorage reads: %c", data[i]);
+    }
+    
 }
 
 
@@ -1055,6 +1205,11 @@ int main(void)
     application_timers_start();
 
     advertising_start();
+
+    fstorage_test();
+    //resetFlash();
+    //writeToFlash();
+    //readFromFlash();
 
     // Enter main loop.
     for (;;)
