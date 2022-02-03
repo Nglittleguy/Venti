@@ -40,39 +40,126 @@ APP_TIMER_DEF(m_led_blink_id);
 uint8_t data_read[32] = {0};
 uint8_t data_flash[32] = {0};
 
-static void fstorage_evt_handler(nrf_fstorage_evt_t * p_evt);
-
-NRF_FSTORAGE_DEF(nrf_fstorage_t fstorage) =
+const char *fds_err_str(ret_code_t ret)
 {
-    /* Set a handler for fstorage events. */
-    .evt_handler = fstorage_evt_handler,
-
-    /* These below are the boundaries of the flash space assigned to this instance of fstorage.
-     * You must set these manually, even at runtime, before nrf_fstorage_init() is called.
-     * The function nrf5_flash_end_addr_get() can be used to retrieve the last address on the
-     * last page of flash available to write data. */
-    .start_addr = 0x7f000,
-    .end_addr   = 0x7ffff,
-};
-
-static void fstorage_evt_handler(nrf_fstorage_evt_t * p_evt)
-{
-    if (p_evt->result != NRF_SUCCESS)
+    /* Array to map FDS return values to strings. */
+    static char const * err_str[] =
     {
-        NRF_LOG_INFO("--> Event received: ERROR while executing an fstorage operation.");
-        return;
+        "FDS_ERR_OPERATION_TIMEOUT",
+        "FDS_ERR_NOT_INITIALIZED",
+        "FDS_ERR_UNALIGNED_ADDR",
+        "FDS_ERR_INVALID_ARG",
+        "FDS_ERR_NULL_ARG",
+        "FDS_ERR_NO_OPEN_RECORDS",
+        "FDS_ERR_NO_SPACE_IN_FLASH",
+        "FDS_ERR_NO_SPACE_IN_QUEUES",
+        "FDS_ERR_RECORD_TOO_LARGE",
+        "FDS_ERR_NOT_FOUND",
+        "FDS_ERR_NO_PAGES",
+        "FDS_ERR_USER_LIMIT_REACHED",
+        "FDS_ERR_CRC_CHECK_FAILED",
+        "FDS_ERR_BUSY",
+        "FDS_ERR_INTERNAL",
+    };
+
+    return err_str[ret - NRF_ERROR_FDS_ERR_BASE];
+}
+
+/**@brief   Begin deleting all records, one by one. */
+void delete_all_begin(void)
+{
+    m_delete_all.delete_next = true;
+}
+
+bool record_delete_next(void)
+{
+    fds_find_token_t  tok   = {0};
+    fds_record_desc_t desc  = {0};
+
+    if (fds_record_iterate(&desc, &tok) == NRF_SUCCESS)
+    {
+        ret_code_t rc = fds_record_delete(&desc);
+        if (rc != NRF_SUCCESS)
+        {
+            return false;
+        }
+
+        return true;
+    }
+    else
+    {
+        /* No records left to delete. */
+        return false;
+    }
+}
+
+/**@brief   Process a delete all command.
+ *
+ * Delete records, one by one, until no records are left.
+ */
+void delete_all_process(void)
+{
+    if (   m_delete_all.delete_next
+        & !m_delete_all.pending)
+    {
+        NRF_LOG_INFO("Deleting next record.");
+
+        m_delete_all.delete_next = record_delete_next();
+        if (!m_delete_all.delete_next)
+        {
+            NRF_LOG_INFO("No records left to delete.");
+        }
+    }
+}
+
+static void wait_for_fds_ready() {
+    while(!m_fds_initialized) {
+        sd_app_evt_wait();
+    }
+}
+
+static void fds_evt_handler(fds_evt_t const * p_evt)
+{
+    if (p_evt->result == NRF_SUCCESS)
+    {
+        NRF_LOG_INFO("Event: %s received (NRF_SUCCESS)",
+                      fds_evt_str[p_evt->id]);
+    }
+    else
+    {
+        NRF_LOG_INFO("Event: %s received (%s)",
+                      fds_evt_str[p_evt->id],
+                      fds_err_str(p_evt->result));
     }
 
     switch (p_evt->id)
     {
-        case NRF_FSTORAGE_EVT_WRITE_RESULT:
+        case FDS_EVT_INIT:
+            if (p_evt->result == NRF_SUCCESS)
+            {
+                m_fds_initialized = true;
+            }
+            break;
+
+        case FDS_EVT_WRITE:
         {
-            NRF_LOG_INFO("--> Event received: wrote %d bytes at address 0x%x.", p_evt->len, p_evt->addr);
+            if (p_evt->result == NRF_SUCCESS)
+            {
+                NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->write.record_id);
+                NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->write.file_id);
+                NRF_LOG_INFO("Record key:\t0x%04x", p_evt->write.record_key);
+            }
         } break;
 
-        case NRF_FSTORAGE_EVT_ERASE_RESULT:
+        case FDS_EVT_DEL_RECORD:
         {
-            NRF_LOG_INFO("--> Event received: erased %d page from address 0x%x.",  p_evt->len, p_evt->addr);
+            if (p_evt->result == NRF_SUCCESS)
+            {
+                NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->del.record_id);
+                NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->del.file_id);
+                NRF_LOG_INFO("Record key:\t0x%04x", p_evt->del.record_key);
+            }
+            m_delete_all.pending = false;
         } break;
 
         default:
@@ -80,34 +167,159 @@ static void fstorage_evt_handler(nrf_fstorage_evt_t * p_evt)
     }
 }
 
+static void flash_storage_init() {
+    fds_stat_t stat = {0};
+    fds_record_desc_t desc = {0};
+    fds_find_token_t  tok  = {0};
 
-static void fstorage_test(void) {
+    (void) fds_register(fds_evt_handler);
+    ret_code_t err = fds_init();
+    APP_ERROR_CHECK(err);
 
-    char m_data[] = "Hidden Message #2";
-    NRF_LOG_INFO("HERE!!!");
+    wait_for_fds_ready();
+    err= fds_stat(&stat);
+    APP_ERROR_CHECK(err);
 
-    //(void) nrf5_flash_end_addr_get();
+    NRF_LOG_INFO("Found %d valid records.", stat.valid_records);
+    NRF_LOG_INFO("Found %d dirty records (ready to be garbage collected).", stat.dirty_records);
 
-    writeFlash(&fstorage, 0x7f210, &m_data, 24);
+    err = fds_record_find(CONFIG_FILE, CONFIG_REC_KEY, &desc, &tok);
+    if(err==NRF_SUCCESS) {
+        /* A config file is in flash. Let's update it. */
+        fds_flash_record_t config = {0};
 
-    readFlash(&fstorage, 0x7f210, data_flash, 24);
+        /* Open the record and read its contents. */
+        err = fds_record_open(&desc, &config);
+        APP_ERROR_CHECK(err);
 
-    printf("Reading: %s\r\n", data_flash);
+        /* Copy the configuration from flash into m_dummy_cfg. */
+        memcpy(&m_dummy_cfg, config.p_data, sizeof(configuration_t));
+
+        NRF_LOG_INFO("Config file found, updating boot count to %d.", m_dummy_cfg.boot_count);
+
+        /* Update boot count. */
+        m_dummy_cfg.boot_count++;
+
+        /* Close the record when done reading. */
+        err = fds_record_close(&desc);
+        APP_ERROR_CHECK(err);
+
+        /* Write the updated record to flash. */
+        err = fds_record_update(&desc, &m_dummy_record);
+        if ((err != NRF_SUCCESS) && (err == FDS_ERR_NO_SPACE_IN_FLASH))
+        {
+            NRF_LOG_INFO("No space in flash, delete some records to update the config file.");
+        }
+        else
+        {
+            APP_ERROR_CHECK(err);
+        }
+    }
+    else {
+        /* System config not found; write a new one. */
+        NRF_LOG_INFO("Writing config file...");
+
+        err = fds_record_write(&desc, &m_dummy_record);
+        if ((err != NRF_SUCCESS) && (err == FDS_ERR_NO_SPACE_IN_FLASH))
+        {
+            NRF_LOG_INFO("No space in flash, delete some records to update the config file.");
+        }
+        else
+        {
+            APP_ERROR_CHECK(err);
+        }
+    }
 }
 
-static void fstorage_init() {
-    nrf_fstorage_api_t * p_fs_api = &nrf_fstorage_sd;
-    NRF_LOG_INFO("Initializing nrf_fstorage_sd implementation...");
-
-    ret_code_t rc;
-    rc = nrf_fstorage_init(&fstorage, p_fs_api, NULL);
-    APP_ERROR_CHECK(rc);
-
-    print_flash_info(&fstorage);
-
-    resetFlash(&fstorage, 0x7f000);
+static void record_read() {
+    NRF_LOG_INFO("Trying to read");
+    fds_find_token_t tok   = {0};
+    fds_record_desc_t desc = {0};
+    fds_flash_record_t rec;
+    
+    while(fds_record_find(0x1, 0xFFFF, &desc, &tok)==NRF_SUCCESS) {
+        if(fds_record_open(&desc, &rec)!=NRF_SUCCESS) {
+            NRF_LOG_INFO("Error in opening record");
+        }
+        printf("Record is: %s", rec.p_data);
+        if(fds_record_close(&desc)!=NRF_SUCCESS) {
+            NRF_LOG_INFO("Error in closing record");
+        }
+    }
 }
 
+static void record_write(uint32_t fid, uint32_t key, void const * p_data, uint32_t len)
+{
+    fds_record_t const rec =
+    {
+        .file_id           = fid,
+        .key               = key,
+        .data.p_data       = p_data,
+        .data.length_words = (len + 3) / sizeof(uint32_t)
+    };
+
+    NRF_LOG_INFO("writing record to flash...\nfile: 0x%x, key: 0x%x, \"%s\", len: %u bytes\n", fid, key, p_data, len);
+
+    ret_code_t err = fds_record_write(NULL, &rec);
+    if (err != NRF_SUCCESS)
+    {
+        NRF_LOG_INFO("error: fds_record_write() returned %s.\n", fds_err_str(err));
+    }
+}
+
+static void record_writing() {
+    static const char m_data[]= "hello world";
+    record_write(0x1, 0xFFFF, &m_data, 12);
+}
+
+
+
+static void print_all_cmd()
+{
+    fds_find_token_t tok   = {0};
+    fds_record_desc_t desc = {0};
+
+    while (fds_record_iterate(&desc, &tok) != FDS_ERR_NOT_FOUND)
+    {
+        ret_code_t err;
+        fds_flash_record_t frec = {0};
+
+        err = fds_record_open(&desc, &frec);
+        switch (err)
+        {
+            case NRF_SUCCESS:
+                break;
+
+            case FDS_ERR_CRC_CHECK_FAILED:
+                printf("error: CRC check failed!\n");
+                continue;
+
+            case FDS_ERR_NOT_FOUND:
+                printf("error: record not found!\n");
+                continue;
+
+            default:
+            {
+                printf("error: unexpecte error %s.\n",fds_err_str(err));
+                continue;
+            }
+        }
+
+        uint32_t const len = frec.p_header->length_words * sizeof(uint32_t);
+
+        printf(" 0x%04x\t"
+                        "\t 0x%04x\t"
+                        "\t 0x%04x\t"
+                        "\t %4u bytes\n",
+                        frec.p_header->record_id,
+                        frec.p_header->file_id,
+                        frec.p_header->record_key,
+                        len);
+
+        err = fds_record_close(&desc);
+        APP_ERROR_CHECK(err);
+    }
+}
 
  //COMMENTED STUFF AWAY IN BSP.C TO REMOVE FLASHING LIGHT FOR TESTING
 //******************************************
@@ -461,6 +673,12 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
         }
         else if(strcmp(data_read, "right")==0) {
           rotateCW();
+        }
+        else if(strcmp(data_read, "read")==0) {
+          record_read();
+        }
+        else if(strcmp(data_read, "write")==0) {
+          record_writing();
         }
 
 
@@ -863,7 +1081,6 @@ static void bsp_event_handler(bsp_event_t event)
      
         case BSP_EVENT_KEY_1:
             NRF_LOG_INFO("2 pressed\n");
-
             do {
               uint8_t data_array[10] = "2 pressed\n";
               uint16_t length = (uint16_t)10;
@@ -1009,8 +1226,9 @@ int main(void)
     advertising_init();
     conn_params_init();
     application_timers_start();
-    fstorage_init();
-    fstorage_test();
+    flash_storage_init();
+    print_all_cmd();
+
     // Start execution.
     printf("My Test App Started.");
     application_timers_start();
