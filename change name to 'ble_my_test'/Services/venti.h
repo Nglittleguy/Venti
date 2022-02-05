@@ -19,20 +19,67 @@ BLE_LED_SERVICE_DEF(m_led_service);
 
 //////////////////////////////////////////////////////////////////////////////////
 //Flash Storage Services
-#include "nrf_fstorage.h"
-#include "nrf_fstorage_sd.h"
-#include "nrf_cli.h"
-#include "nrf_cli_uart.h"
+#include "fds.h"
 
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
 
-void wait_for_flash_ready(nrf_fstorage_t const * p_fstorage);
-void print_flash_info(nrf_fstorage_t * p_fstorage);
-ret_code_t resetFlash(nrf_fstorage_t * fstorage, uint32_t addr);
-ret_code_t writeFlash(nrf_fstorage_t * fstorage, uint32_t addr, void* data, uint32_t len);
-ret_code_t readFlash(nrf_fstorage_t * fstorage, uint32_t addr, uint8_t* data_buffer, uint32_t len);
+static char const * fds_evt_str[] =
+{
+    "FDS_EVT_INIT",
+    "FDS_EVT_WRITE",
+    "FDS_EVT_UPDATE",
+    "FDS_EVT_DEL_RECORD",
+    "FDS_EVT_DEL_FILE",
+    "FDS_EVT_GC",
+};
+
+/* Keep track of the progress of a delete_all operation. */
+static struct
+{
+    bool delete_next;   //!< Delete next record.
+    bool pending;       //!< Waiting for an fds FDS_EVT_DEL_RECORD event, to delete the next record.
+} m_delete_all;
+
+/* Flag to check fds initialization. */
+static bool volatile m_fds_initialized;
+
+
+#define CONFIG_FILE     (0x8010)
+#define CONFIG_REC_KEY  (0x7010)
+
+/* A dummy structure to save in flash. */
+typedef struct
+{
+    uint32_t boot_count;
+    char     device_name[16];
+    bool     config1_on;
+    bool     config2_on;
+} configuration_t;
+
+/* Dummy configuration data. */
+static configuration_t m_dummy_cfg =
+{
+    .config1_on  = false,
+    .config2_on  = true,
+    .boot_count  = 0x0,
+    .device_name = "dummy",
+};
+
+/* A record containing dummy configuration data. */
+static fds_record_t const m_dummy_record =
+{
+    .file_id           = CONFIG_FILE,
+    .key               = CONFIG_REC_KEY,
+    .data.p_data       = &m_dummy_cfg,
+    /* The length of a record is always expressed in 4-byte units (words). */
+    .data.length_words = (sizeof(m_dummy_cfg) + 3) / sizeof(uint32_t),
+};
+
+void delete_all_begin(void);
+
+const char *fds_err_str(ret_code_t ret);
 
 /////////////////////////////////////////////////////////////////////////////////
 //UART (NUS) Services
@@ -87,8 +134,13 @@ void bsp_board_motor_init(void);
 
 void reset_motor();
 
-void rotateCW();
+void rotateCWHalf();
 
-void rotateCCW();
+void rotateCCWHalf();
 
+void rotateCW(short amount);
+
+void rotateCCW(short amount);
+
+void rotate(uint8_t val);
 #endif

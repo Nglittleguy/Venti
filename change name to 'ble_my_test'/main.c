@@ -38,7 +38,9 @@ APP_TIMER_DEF(m_battery_timer_id);
 APP_TIMER_DEF(m_led_blink_id);
 
 uint8_t data_read[32] = {0};
+uint8_t data_cmp[32] = {0};
 uint8_t data_flash[32] = {0};
+
 
 const char *fds_err_str(ret_code_t ret)
 {
@@ -669,16 +671,23 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
           flipLights(false);
         }
         else if(strcmp(data_read, "left")==0) {
-          rotateCCW();
+        NRF_LOG_INFO("lefttk");
+          rotateCCWHalf();
         }
         else if(strcmp(data_read, "right")==0) {
-          rotateCW();
+            NRF_LOG_INFO("right");
+          rotateCWHalf();
         }
         else if(strcmp(data_read, "read")==0) {
           record_read();
         }
         else if(strcmp(data_read, "write")==0) {
           record_writing();
+        }
+        else if(strncmp(data_read, "open", 4)==0) {
+          uint8_t target = (uint8_t) atoi(data_read+5);
+          printf("Rotate to %d", target);
+          rotate(target);
         }
 
 
@@ -1226,6 +1235,7 @@ int main(void)
     advertising_init();
     conn_params_init();
     application_timers_start();
+    bsp_board_motor_init();
     flash_storage_init();
     print_all_cmd();
 
