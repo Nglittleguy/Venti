@@ -3,6 +3,80 @@
 //////////////////////////////////////////////////////////////////////////////////
 //Flash Storage Services
 
+const char *fds_err_str(ret_code_t ret)
+{
+    /* Array to map FDS return values to strings. */
+    static char const * err_str[] =
+    {
+        "FDS_ERR_OPERATION_TIMEOUT",
+        "FDS_ERR_NOT_INITIALIZED",
+        "FDS_ERR_UNALIGNED_ADDR",
+        "FDS_ERR_INVALID_ARG",
+        "FDS_ERR_NULL_ARG",
+        "FDS_ERR_NO_OPEN_RECORDS",
+        "FDS_ERR_NO_SPACE_IN_FLASH",
+        "FDS_ERR_NO_SPACE_IN_QUEUES",
+        "FDS_ERR_RECORD_TOO_LARGE",
+        "FDS_ERR_NOT_FOUND",
+        "FDS_ERR_NO_PAGES",
+        "FDS_ERR_USER_LIMIT_REACHED",
+        "FDS_ERR_CRC_CHECK_FAILED",
+        "FDS_ERR_BUSY",
+        "FDS_ERR_INTERNAL",
+    };
+
+    return err_str[ret - NRF_ERROR_FDS_ERR_BASE];
+}
+
+/**@brief   Begin deleting all records, one by one. */
+void delete_all_begin(void)
+{
+    m_delete_all.delete_next = true;
+}
+
+bool record_delete_next(void)
+{
+    fds_find_token_t  tok   = {0};
+    fds_record_desc_t desc  = {0};
+
+    if (fds_record_iterate(&desc, &tok) == NRF_SUCCESS)
+    {
+        ret_code_t rc = fds_record_delete(&desc);
+        if (rc != NRF_SUCCESS)
+        {
+            return false;
+        }
+
+        return true;
+    }
+    else
+    {
+        /* No records left to delete. */
+        return false;
+    }
+}
+
+/**@brief   Process a delete all command.
+ *
+ * Delete records, one by one, until no records are left.
+ */
+void delete_all_process(void)
+{
+    if (   m_delete_all.delete_next
+        & !m_delete_all.pending)
+    {
+        NRF_LOG_INFO("Deleting next record.");
+
+        m_delete_all.delete_next = record_delete_next();
+        if (!m_delete_all.delete_next)
+        {
+            NRF_LOG_INFO("No records left to delete.");
+        }
+    }
+}
+
+
+
 
 
 //////////////////////////////////////////////////////////////////////////////////
@@ -95,7 +169,6 @@ void rotateCCW(short amount) {
 }
 
 void rotate(uint8_t target_open_amount) {
-    printf("What's going on? %d\n", target_open_amount);
     
     short steps_to_take = current_open_amount - target_open_amount;
     current_open_amount = target_open_amount;
@@ -109,3 +182,195 @@ void rotate(uint8_t target_open_amount) {
     }
 }
 
+
+/////////////////////////////////////////////////////////////////////////////////
+//Temperature Sensor - https://github.com/DSysoletin/nrf52_ds18b20_example/blob/master/main.c
+
+/**@brief Function for sending one bit to bus.
+ */
+void ds18b20_send(char bit)
+{
+    nrf_gpio_cfg_output(DS18B20PIN);
+    nrf_gpio_pin_clear(DS18B20PIN);
+
+    if(bit==1)
+    {   
+        nrf_delay_us(5);
+        nrf_gpio_pin_set(DS18B20PIN);
+        nrf_delay_us(65);
+    }
+    else {
+        nrf_delay_us(60);
+        nrf_gpio_pin_set(DS18B20PIN);
+        nrf_delay_us(10);
+    }
+    
+}
+
+
+/**@brief Function for reading one bit from bus.
+ */
+unsigned char ds18b20_read(void)
+{
+    unsigned char presence=0;
+    nrf_gpio_cfg_output(DS18B20PIN);
+    nrf_gpio_pin_clear(DS18B20PIN);
+
+    nrf_delay_us(5);
+
+    nrf_gpio_cfg_input(DS18B20PIN,NRF_GPIO_PIN_NOPULL);
+
+    nrf_delay_us(5);
+
+    if(nrf_gpio_pin_read(DS18B20PIN)) {
+        presence = 1;
+    }
+    else {
+        presence = 0;
+    }
+    
+    return presence;
+}
+
+
+/**@brief Function for sending one byte to bus.
+ */
+void ds18b20_send_byte(char data)
+{
+    unsigned char i;
+    unsigned char x;
+    for(i=0;i<8;i++)
+    {
+      x = data>>i;
+      x &= 0x01;
+      ds18b20_send(x);
+    }
+    nrf_delay_us(200);
+}
+
+/**@brief Function for reading one byte from bus.
+ */
+unsigned char ds18b20_read_byte(void)
+{
+    unsigned char i;
+    unsigned char data = 0;
+    for (i=0;i<8;i++)
+    {
+        //if(ds18b20_read()) data|=0x01<<i;
+        data = data >> 1;
+        nrf_gpio_pin_clear(DS18B20PIN);
+        nrf_gpio_cfg_output(DS18B20PIN);
+        
+        nrf_delay_us(5);
+
+        nrf_gpio_cfg_input(DS18B20PIN,NRF_GPIO_PIN_NOPULL);
+
+        nrf_delay_us(5);
+
+        if(nrf_gpio_pin_read(DS18B20PIN)) {
+            data |= 0x80;
+        }
+
+        nrf_delay_us(50);
+    }
+    
+    return(data);
+}
+
+bool ds18b20_reset_and_check(void) {
+    bool res=0;
+    //Form reset pulse
+  
+    nrf_gpio_cfg_output(DS18B20PIN);
+    nrf_gpio_pin_write(DS18B20PIN,0);
+    nrf_delay_us(480);
+    //Release bus and wait 15-60MS
+    nrf_gpio_cfg_input(DS18B20PIN, NRF_GPIO_PIN_PULLUP);
+    nrf_delay_us(70);
+
+    //Read from bus
+    res=nrf_gpio_pin_read(DS18B20PIN);
+    while(nrf_gpio_pin_read(DS18B20PIN)!=0) {
+        nrf_delay_us(10);
+    }
+    if(res==0)
+    {
+      nrf_delay_us(500);
+      return true;
+    }
+    return false;
+}
+
+float ds18b20_read_temp(void) {
+    char t1 = 0, t2 = 0;
+    double f;
+    uint8_t scratchPad[9];
+    if(ds18b20_reset_and_check()) {
+
+        ds18b20_send_byte(0xCC);
+        ds18b20_send_byte(0x44);
+        nrf_delay_ms(410);
+
+        if(ds18b20_reset_and_check()) {
+
+            ds18b20_send_byte(0xCC);
+            ds18b20_send_byte(0xBE);
+
+            for(uint8_t i = 0; i<9; i++) {
+                scratchPad[i] = ds18b20_read_byte();
+                printf("Scratch %d: %x\n", i, scratchPad[i]);
+            }
+
+            t1 = scratchPad[0];
+            t2 = scratchPad[1];
+
+            f=(float)((t1 + (t2*256))/16);
+
+            if(ds18b20_reset_and_check()) {
+                return(f);
+            }
+        }
+    }
+
+    return 0;
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////
+//Scheduling System
+
+Schedule_event schedule[7][5] = {NULL};
+
+void printSchedule() {
+    char c[32];
+    for(int i = 0; i<7; i++) {
+        printf("%s Schedule:\n", daysOfWeek[i]);
+        for(int j = 0; j<5; j++) {
+            memset(c, 0, 32);
+            currentTimeFromSegment(c, schedule[i][j].time);
+            printf("%d. %s - %d\n\r", j+1, c, schedule[i][j].amount);
+        }
+    }
+}
+
+
+void currentTimeFromSegment(char* buf, uint16_t time_segment) {
+    if(time_segment>2015) {
+        sprintf(buf, "Error in Time Segment");
+        return;
+    }
+    uint8_t dayOfWeek = time_segment/288;
+    uint16_t dayTime = time_segment%288;
+    uint16_t hour = dayTime/12;
+    uint16_t minute = 5*(dayTime%12);
+    sprintf(buf, "Time: %s %02d:%02d", daysOfWeek[dayOfWeek], hour, minute); 
+}
+
+void addToSchedule(uint8_t slot, uint16_t time, uint8_t amount) {
+    uint8_t dayOfWeek = time/288;
+    if(slot>4 || time>2015) {
+        printf("Error - Slot or Time exceeds bounds");
+    }
+    schedule[dayOfWeek][slot].time = time;
+    schedule[dayOfWeek][slot].amount = amount;
+}

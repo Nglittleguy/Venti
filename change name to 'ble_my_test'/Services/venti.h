@@ -78,6 +78,8 @@ static fds_record_t const m_dummy_record =
 };
 
 void delete_all_begin(void);
+bool record_delete_next(void);
+void delete_all_process(void);
 
 const char *fds_err_str(ret_code_t ret);
 
@@ -144,3 +146,36 @@ void rotateCCW(short amount);
 
 void rotate(uint8_t val);
 #endif
+
+/////////////////////////////////////////////////////////////////////////////////
+//Temperature Sensor - https://github.com/DSysoletin/nrf52_ds18b20_example/blob/master/main.c
+
+
+#define DS18B20PIN 16
+
+void ds18b20_send(char bit);
+unsigned char ds18b20_read(void);
+void ds18b20_send_byte(char data);
+unsigned char ds18b20_read_byte(void);
+bool ds18b20_reset_and_check(void);
+float ds18b20_read_temp(void);
+
+
+/////////////////////////////////////////////////////////////////////////////////
+//Scheduling System
+
+typedef struct
+{
+    uint16_t time;
+    uint8_t amount;
+
+} Schedule_event;
+
+static const char daysOfWeek[7][10] = {"Monday", "Tuesday", "Wednesday",
+    "Thursday", "Friday", "Saturday", "Sunday"};
+
+extern Schedule_event schedule[7][5];
+
+void printSchedule();
+void addToSchedule(uint8_t slot, uint16_t time, uint8_t amount);
+void currentTimeFromSegment(char* buf, uint16_t time_segment);
