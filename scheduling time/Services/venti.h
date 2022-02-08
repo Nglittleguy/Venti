@@ -169,12 +169,14 @@ typedef struct
     uint16_t time;
     uint8_t amount;
 
-} Schedule_event;
+}Schedule_event;
 
 static const char daysOfWeek[7][10] = {"Monday", "Tuesday", "Wednesday",
     "Thursday", "Friday", "Saturday", "Sunday"};
 
 extern Schedule_event schedule[7][5];
 
+void initSchedule();
 void printSchedule();
+void addToSchedule(uint8_t slot, uint16_t time, uint8_t amount);
 void currentTimeFromSegment(char* buf, uint16_t time_segment);

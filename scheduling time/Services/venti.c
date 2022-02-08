@@ -169,7 +169,6 @@ void rotateCCW(short amount) {
 }
 
 void rotate(uint8_t target_open_amount) {
-    printf("What's going on? %d\n", target_open_amount);
     
     short steps_to_take = current_open_amount - target_open_amount;
     current_open_amount = target_open_amount;
@@ -340,15 +339,24 @@ float ds18b20_read_temp(void) {
 /////////////////////////////////////////////////////////////////////////////////
 //Scheduling System
 
-Schedule_event schedule[7][5] = {};
+Schedule_event schedule[7][5];
+
+void initSchedule() {
+    for(int i = 0; i<7; i++) {
+        for(int j = 0; j<5; j++) {
+            schedule[i][j].time = 9999;
+        }
+    }
+}
 
 void printSchedule() {
-
     char c[32];
-
     for(int i = 0; i<7; i++) {
         printf("%s Schedule:\n", daysOfWeek[i]);
         for(int j = 0; j<5; j++) {
+            if(schedule[i][j].time==9999) {
+                continue;
+            }
             memset(c, 0, 32);
             currentTimeFromSegment(c, schedule[i][j].time);
             printf("%d. %s - %d\n\r", j+1, c, schedule[i][j].amount);
@@ -359,7 +367,7 @@ void printSchedule() {
 
 void currentTimeFromSegment(char* buf, uint16_t time_segment) {
     if(time_segment>2015) {
-        sprintf(buf, "Error in Time Segment");
+        sprintf(buf, "Error in Time Segment %d", time_segment);
         return;
     }
     uint8_t dayOfWeek = time_segment/288;
@@ -369,3 +377,12 @@ void currentTimeFromSegment(char* buf, uint16_t time_segment) {
     sprintf(buf, "Time: %s %02d:%02d", daysOfWeek[dayOfWeek], hour, minute); 
 }
 
+
+void addToSchedule(uint8_t slot, uint16_t time, uint8_t amount) {
+    uint8_t dayOfWeek = time/288;
+    if(slot>4 || time>2015) {
+        printf("Error - Slot or Time exceeds bounds");
+    }
+    schedule[dayOfWeek][slot].time = time;
+    schedule[dayOfWeek][slot].amount = amount;
+}
