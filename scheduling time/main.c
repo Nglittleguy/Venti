@@ -1165,6 +1165,8 @@ static void advertising_start()
 int main(void)
 {
     bool erase_bonds;
+    
+    initSchedule();
 
     schedule[0][0].time = 10;     //0:50
     schedule[0][0].amount = 10;
