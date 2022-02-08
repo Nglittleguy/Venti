@@ -36,89 +36,33 @@
 
 APP_TIMER_DEF(m_battery_timer_id);
 APP_TIMER_DEF(m_led_blink_id);
+APP_TIMER_DEF(m_time_segment_id);
+
+
+static uint32_t current_epoch_sec = 1644351445;
+static uint16_t current_time_segment = 0;     //Mon 12am
+
+
+uint16_t dataFileID = 0;                      //Can't be 0xFFFF
+uint16_t dataFileRecord = 1;                  //Can't be 0x0000
+
+bool to_write_voltage = false;
 
 uint8_t data_read[32] = {0};
 uint8_t data_cmp[32] = {0};
 uint8_t data_flash[32] = {0};
 
-
-const char *fds_err_str(ret_code_t ret)
-{
-    /* Array to map FDS return values to strings. */
-    static char const * err_str[] =
-    {
-        "FDS_ERR_OPERATION_TIMEOUT",
-        "FDS_ERR_NOT_INITIALIZED",
-        "FDS_ERR_UNALIGNED_ADDR",
-        "FDS_ERR_INVALID_ARG",
-        "FDS_ERR_NULL_ARG",
-        "FDS_ERR_NO_OPEN_RECORDS",
-        "FDS_ERR_NO_SPACE_IN_FLASH",
-        "FDS_ERR_NO_SPACE_IN_QUEUES",
-        "FDS_ERR_RECORD_TOO_LARGE",
-        "FDS_ERR_NOT_FOUND",
-        "FDS_ERR_NO_PAGES",
-        "FDS_ERR_USER_LIMIT_REACHED",
-        "FDS_ERR_CRC_CHECK_FAILED",
-        "FDS_ERR_BUSY",
-        "FDS_ERR_INTERNAL",
-    };
-
-    return err_str[ret - NRF_ERROR_FDS_ERR_BASE];
-}
-
-/**@brief   Begin deleting all records, one by one. */
-void delete_all_begin(void)
-{
-    m_delete_all.delete_next = true;
-}
-
-bool record_delete_next(void)
-{
-    fds_find_token_t  tok   = {0};
-    fds_record_desc_t desc  = {0};
-
-    if (fds_record_iterate(&desc, &tok) == NRF_SUCCESS)
-    {
-        ret_code_t rc = fds_record_delete(&desc);
-        if (rc != NRF_SUCCESS)
-        {
-            return false;
-        }
-
-        return true;
-    }
-    else
-    {
-        /* No records left to delete. */
-        return false;
-    }
-}
-
-/**@brief   Process a delete all command.
- *
- * Delete records, one by one, until no records are left.
- */
-void delete_all_process(void)
-{
-    if (   m_delete_all.delete_next
-        & !m_delete_all.pending)
-    {
-        NRF_LOG_INFO("Deleting next record.");
-
-        m_delete_all.delete_next = record_delete_next();
-        if (!m_delete_all.delete_next)
-        {
-            NRF_LOG_INFO("No records left to delete.");
-        }
-    }
-}
+//Buffer to write to flash (asynchronous) must not be on stack
+static char flash_write_buf[32];
+static char flash_write_temp[32];
 
 static void wait_for_fds_ready() {
     while(!m_fds_initialized) {
         sd_app_evt_wait();
     }
 }
+
+static void record_day_voltage();
 
 static void fds_evt_handler(fds_evt_t const * p_evt)
 {
@@ -150,6 +94,9 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
                 NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->write.record_id);
                 NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->write.file_id);
                 NRF_LOG_INFO("Record key:\t0x%04x", p_evt->write.record_key);
+            }
+            if(to_write_voltage) {
+                record_day_voltage();
             }
         } break;
 
@@ -233,17 +180,18 @@ static void flash_storage_init() {
     }
 }
 
-static void record_read() {
+
+static void record_read_file(uint16_t fileID, uint16_t recordKey) {
     NRF_LOG_INFO("Trying to read");
     fds_find_token_t tok   = {0};
     fds_record_desc_t desc = {0};
     fds_flash_record_t rec;
     
-    while(fds_record_find(0x1, 0xFFFF, &desc, &tok)==NRF_SUCCESS) {
+    while(fds_record_find(fileID, recordKey, &desc, &tok)==NRF_SUCCESS) {
         if(fds_record_open(&desc, &rec)!=NRF_SUCCESS) {
             NRF_LOG_INFO("Error in opening record");
         }
-        printf("Record is: %s", rec.p_data);
+        printf("Record: %s\n\r", rec.p_data);
         if(fds_record_close(&desc)!=NRF_SUCCESS) {
             NRF_LOG_INFO("Error in closing record");
         }
@@ -269,12 +217,16 @@ static void record_write(uint32_t fid, uint32_t key, void const * p_data, uint32
     }
 }
 
-static void record_writing() {
-    static const char m_data[]= "hello world";
-    record_write(0x1, 0xFFFF, &m_data, 12);
+static void record_day_voltage() {
+    dataFileID++;
+    setDayVoltageBuffer(flash_write_buf, current_epoch_sec);
+    record_write(dataFileID, 0x0001, &flash_write_buf, 32);
 }
 
-
+static void record_temp() {
+    setTemperatureBuffer(flash_write_temp, current_time_segment);
+    record_write(dataFileID, 0x0002, &flash_write_temp, 32);
+}
 
 static void print_all_cmd()
 {
@@ -323,7 +275,7 @@ static void print_all_cmd()
     }
 }
 
- //COMMENTED STUFF AWAY IN BSP.C TO REMOVE FLASHING LIGHT FOR TESTING
+
 //******************************************
 
 
@@ -446,6 +398,45 @@ static void led_blink_timeout_handler(void * p_context)
     bsp_board_led_on(BLINK_LED);
     nrf_delay_ms(1000);
     bsp_board_led_off(BLINK_LED);
+    
+}
+
+static void time_segment_timeout_handler(void *p_context)
+{
+    UNUSED_PARAMETER(p_context);
+    current_time_segment++;
+
+    //New Hour 
+    if(current_time_segment % 12 == 0) {
+
+        //New Day
+        if(current_time_segment % 288 == 0) {
+            current_epoch_sec += 86400;
+
+            //New Week, reset to 0
+            if(current_time_segment == 2016) {
+                current_time_segment = 0;
+            } 
+
+            to_write_voltage = true;
+        }
+
+        //Write to file temp min, max
+        record_temp();
+        resetTemperatureMinMax();
+    }
+    else {
+        compareTemperatureMinMax();
+        printf("Min temp: %d, max temp: %d\n\r", current_time_segment, temp_min, temp_max);
+    }
+
+    if(checkSchedule(current_time_segment)) {
+        NRF_LOG_INFO("Schedule rotated the vent");
+    }
+
+
+
+
 }
 
 
@@ -464,6 +455,9 @@ static void timers_init(void)
     APP_ERROR_CHECK(err_code);
 
     err_code = app_timer_create(&m_led_blink_id, APP_TIMER_MODE_REPEATED, led_blink_timeout_handler);
+    APP_ERROR_CHECK(err_code);
+
+    err_code = app_timer_create(&m_time_segment_id, APP_TIMER_MODE_REPEATED, time_segment_timeout_handler);
     APP_ERROR_CHECK(err_code);
 
     // Create timers.
@@ -661,35 +655,81 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
 
         memset(data_read, '\0', 32);
         for (uint32_t i = 0; i < p_evt->params.rx_data.length && i < 32; i++) {
-          data_read[i] = p_evt->params.rx_data.p_data[i];
+            data_read[i] = p_evt->params.rx_data.p_data[i];
         }
 
         if(strcmp(data_read, "on")==0) {
-          flipLights(true);
+            flipLights(true);
         }
         else if(strcmp(data_read, "off")==0) {
-          flipLights(false);
+            flipLights(false);
         }
         else if(strcmp(data_read, "left")==0) {
-        NRF_LOG_INFO("lefttk");
-          rotateCCWHalf();
+            NRF_LOG_INFO("left");
+            rotateCCWHalf();
         }
         else if(strcmp(data_read, "right")==0) {
             NRF_LOG_INFO("right");
-          rotateCWHalf();
+            rotateCWHalf();
         }
-        else if(strcmp(data_read, "read")==0) {
-          record_read();
-        }
+        //else if(strcmp(data_read, "read")==0) {
+        //    record_read();
+        //}
         else if(strcmp(data_read, "write")==0) {
-          record_writing();
-        }
-        else if(strncmp(data_read, "open", 4)==0) {
-          uint8_t target = (uint8_t) atoi(data_read+5);
-          printf("Rotate to %d", target);
-          rotate(target);
+            record_day_voltage();
         }
 
+        //Open The vent to an amount
+        else if(strncmp(data_read, "open", 4)==0) {
+            uint8_t target = (uint8_t) atoi(data_read+5);
+            printf("Rotate to %d", target);
+            rotate(target);
+        }
+
+        //Read the current temperature
+        else if(strcmp(data_read, "temp")==0) {
+            char data_array[10];
+            uint16_t length = (uint16_t)10;
+            float current_temp = ds18b20_read_temp();
+            sprintf(data_array, "%fC", current_temp);
+            printf("Read temperature as: %f\n", current_temp);
+            err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
+            if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+            {
+                APP_ERROR_CHECK(err_code);
+            }
+        }
+        
+        //Set a schedule
+        else if(strncmp(data_read, "schedule", 8)==0) {
+            char *ptr = strtok(data_read, " ");
+
+            ptr = strtok(NULL, " ");
+            uint8_t slot = atoi(ptr);
+           
+            ptr = strtok(NULL, " ");
+            uint16_t time = atoi(ptr);
+
+            ptr = strtok(NULL, " ");
+            uint16_t amount = atoi(ptr);
+
+            printf("Received Scheduling: %d, %d, %d\n\r", slot, time, amount);
+            addToSchedule(slot, time, amount);
+            printSchedule();
+        }
+
+        else if(strncmp(data_read, "read", 4)==0) {
+            char *ptr = strtok(data_read, " ");
+
+            ptr = strtok(NULL, " ");
+            uint8_t fileID = atoi(ptr);
+           
+            ptr = strtok(NULL, " ");
+            uint16_t recordKey = atoi(ptr);
+
+            printf("Received Read of File: %d, %d\n\r", fileID, recordKey);
+            record_read_file(fileID, recordKey);
+        }
 
         //Don't actually need to output to UART, just read in
         /*
@@ -793,6 +833,7 @@ static void services_init(void)
     err_code = ble_nus_init(&m_nus, &nus_init);
     APP_ERROR_CHECK(err_code);
 
+    initSchedule();
 
     /* YOUR_JOB: Add code to initialize the services used by the application.
        ble_xxs_init_t                     xxs_init;
@@ -886,7 +927,10 @@ static void application_timers_start(void)
     err_code = app_timer_start(m_battery_timer_id, BATTERY_LEVEL_MEAS_INTERVAL, NULL);
     APP_ERROR_CHECK(err_code);
 
-    err_code = app_timer_start(m_led_blink_id,LED_BLINK_INTERVAL, NULL);
+    err_code = app_timer_start(m_led_blink_id, LED_BLINK_INTERVAL, NULL);
+    APP_ERROR_CHECK(err_code);
+
+    err_code = app_timer_start(m_time_segment_id, SEGMENT_INTERVAL, NULL);
     APP_ERROR_CHECK(err_code);
 }
 
@@ -1222,6 +1266,7 @@ int main(void)
 {
     bool erase_bonds;
 
+    
     // Initialize.
     log_init();
     timers_init();
@@ -1238,6 +1283,8 @@ int main(void)
     bsp_board_motor_init();
     flash_storage_init();
     print_all_cmd();
+    
+    record_day_voltage();
 
     // Start execution.
     printf("My Test App Started.");
@@ -1248,7 +1295,7 @@ int main(void)
     // Enter main loop.
     for (;;)
     {
-        idle_state_handle();
+        idle_state_handle();;
     }
 }
 

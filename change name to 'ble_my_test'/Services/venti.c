@@ -1,6 +1,10 @@
 #include "venti.h"
 
 //////////////////////////////////////////////////////////////////////////////////
+//Battery & Blinking LED Services
+
+
+//////////////////////////////////////////////////////////////////////////////////
 //Flash Storage Services
 
 const char *fds_err_str(ret_code_t ret)
@@ -77,7 +81,17 @@ void delete_all_process(void)
 
 
 
+void setDayVoltageBuffer(char* flash_write_buf, uint32_t epoch) {
+    memset(flash_write_buf, 0, 36);
+    uint16_t vbatt;
+    battery_voltage_get(&vbatt);
+    sprintf(flash_write_buf, "Time: %d - %d mV", epoch, vbatt);
+}
 
+void setTemperatureBuffer(char* flash_write_temp, uint16_t segment) {
+    memset(flash_write_temp, 0, 36);
+    sprintf(flash_write_temp, "Segment %d: %d - %d", segment, temp_min, temp_max);
+}
 
 //////////////////////////////////////////////////////////////////////////////////
 //Motor Services
@@ -185,6 +199,10 @@ void rotate(uint8_t target_open_amount) {
 
 /////////////////////////////////////////////////////////////////////////////////
 //Temperature Sensor - https://github.com/DSysoletin/nrf52_ds18b20_example/blob/master/main.c
+
+short temp_max = SHRT_MIN;
+short temp_min = SHRT_MAX;
+
 
 /**@brief Function for sending one bit to bus.
  */
@@ -318,7 +336,7 @@ float ds18b20_read_temp(void) {
 
             for(uint8_t i = 0; i<9; i++) {
                 scratchPad[i] = ds18b20_read_byte();
-                printf("Scratch %d: %x\n", i, scratchPad[i]);
+                //printf("Scratch %d: %x\n", i, scratchPad[i]);
             }
 
             t1 = scratchPad[0];
@@ -339,13 +357,24 @@ float ds18b20_read_temp(void) {
 /////////////////////////////////////////////////////////////////////////////////
 //Scheduling System
 
-Schedule_event schedule[7][5] = {NULL};
+Schedule_event schedule[7][5];
+
+void initSchedule() {
+    for(int i = 0; i<7; i++) {
+        for(int j = 0; j<5; j++) {
+            schedule[i][j].time = 9999;
+        }
+    }
+}
 
 void printSchedule() {
     char c[32];
     for(int i = 0; i<7; i++) {
         printf("%s Schedule:\n", daysOfWeek[i]);
         for(int j = 0; j<5; j++) {
+            if(schedule[i][j].time==9999) {
+                continue;
+            }
             memset(c, 0, 32);
             currentTimeFromSegment(c, schedule[i][j].time);
             printf("%d. %s - %d\n\r", j+1, c, schedule[i][j].amount);
@@ -356,7 +385,7 @@ void printSchedule() {
 
 void currentTimeFromSegment(char* buf, uint16_t time_segment) {
     if(time_segment>2015) {
-        sprintf(buf, "Error in Time Segment");
+        sprintf(buf, "Error in Time Segment %d", time_segment);
         return;
     }
     uint8_t dayOfWeek = time_segment/288;
@@ -366,11 +395,49 @@ void currentTimeFromSegment(char* buf, uint16_t time_segment) {
     sprintf(buf, "Time: %s %02d:%02d", daysOfWeek[dayOfWeek], hour, minute); 
 }
 
+
 void addToSchedule(uint8_t slot, uint16_t time, uint8_t amount) {
     uint8_t dayOfWeek = time/288;
-    if(slot>4 || time>2015) {
+    if(slot>5 || slot == 0 || time>2015) {
         printf("Error - Slot or Time exceeds bounds");
     }
-    schedule[dayOfWeek][slot].time = time;
-    schedule[dayOfWeek][slot].amount = amount;
+    schedule[dayOfWeek][slot-1].time = time;
+    schedule[dayOfWeek][slot-1].amount = amount;
+}
+
+
+
+
+/////////////////////////////////////////////////////////////////////////////////
+//Timer for Events
+
+void resetTemperatureMinMax() {
+    short temp_x_100 = (short) 100*ds18b20_read_temp();
+    temp_min = (short) temp_x_100;
+    temp_max = (short) temp_x_100;
+}
+
+void compareTemperatureMinMax() {
+    short temp_x_100 = (short) 100*ds18b20_read_temp();
+    if(temp_x_100 < temp_min) {
+        temp_min = temp_x_100;
+    }
+    if(temp_x_100 > temp_max) {
+        temp_max = temp_x_100;
+    }
+}
+
+bool checkSchedule(uint16_t time_segment) {
+    NRF_LOG_INFO("Time is %d", time_segment);
+    uint8_t dayOfWeek = time_segment/288;
+    bool hasRotated = false;
+    for(int i = 0; i<5; i++) {
+        if(schedule[dayOfWeek][i].time == time_segment) {
+            rotate(schedule[dayOfWeek][i].amount);
+            hasRotated = true;
+            NRF_LOG_INFO("Rotated to %d at %d following Schedule",
+                schedule[dayOfWeek][i].amount, schedule[dayOfWeek][i].time);
+        }
+    }
+    return hasRotated;
 }

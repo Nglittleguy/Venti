@@ -83,6 +83,9 @@ void delete_all_process(void);
 
 const char *fds_err_str(ret_code_t ret);
 
+void setDayVoltageBuffer(char* flash_write_buf, uint32_t epoch);
+void setTemperatureBuffer(char* flash_write_temp, uint16_t segment);
+
 /////////////////////////////////////////////////////////////////////////////////
 //UART (NUS) Services
 
@@ -105,6 +108,7 @@ const char *fds_err_str(ret_code_t ret);
 BLE_NUS_DEF(m_nus, NRF_SDH_BLE_TOTAL_LINK_COUNT);                                   /**< BLE NUS service instance. */
 
 static uint16_t   m_ble_nus_max_data_len = BLE_GATT_ATT_MTU_DEFAULT - 3;            /**< Maximum length of data (in bytes) that can be transmitted to the peer by the Nordic UART service module. */
+
 
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -150,7 +154,6 @@ void rotate(uint8_t val);
 /////////////////////////////////////////////////////////////////////////////////
 //Temperature Sensor - https://github.com/DSysoletin/nrf52_ds18b20_example/blob/master/main.c
 
-
 #define DS18B20PIN 16
 
 void ds18b20_send(char bit);
@@ -160,6 +163,8 @@ unsigned char ds18b20_read_byte(void);
 bool ds18b20_reset_and_check(void);
 float ds18b20_read_temp(void);
 
+extern short temp_max;
+extern short temp_min;
 
 /////////////////////////////////////////////////////////////////////////////////
 //Scheduling System
@@ -169,13 +174,25 @@ typedef struct
     uint16_t time;
     uint8_t amount;
 
-} Schedule_event;
+}Schedule_event;
 
 static const char daysOfWeek[7][10] = {"Monday", "Tuesday", "Wednesday",
     "Thursday", "Friday", "Saturday", "Sunday"};
 
 extern Schedule_event schedule[7][5];
 
+void initSchedule();
 void printSchedule();
 void addToSchedule(uint8_t slot, uint16_t time, uint8_t amount);
 void currentTimeFromSegment(char* buf, uint16_t time_segment);
+
+
+/////////////////////////////////////////////////////////////////////////////////
+//Timer For Events
+
+#include "limits.h"
+#define SEGMENT_INTERVAL              APP_TIMER_TICKS(10000)  //300000
+
+void resetTemperatureMinMax();
+void compareTemperatureMinMax();
+bool checkSchedule(uint16_t time_segment);
