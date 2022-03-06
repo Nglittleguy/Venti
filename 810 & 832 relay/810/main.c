@@ -305,6 +305,12 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
             uint16_t len_to_conn = p_evt->params.rx_data.length;
             ble_nus_data_send(&m_nus, (uint8_t *)p_evt->params.rx_data.p_data, &len_to_conn, m_conn_handle);
         }
+        else {
+            uint16_t len_to_relay = p_evt->params.rx_data.length;
+            ble_nus_data_send(&m_nus, (uint8_t *)p_evt->params.rx_data.p_data, &len_to_relay, p_evt->conn_handle);
+        }
+
+        
 
         //TESTING
         if(p_evt->params.rx_data.length==2) {
