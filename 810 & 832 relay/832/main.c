@@ -38,7 +38,8 @@
 #include "nrf_ble_scan.h"
 
 static uint16_t m_conn_handle = BLE_CONN_HANDLE_INVALID;                        /**< Handle of the current connection. */
-
+static uint16_t m_conn_relay = BLE_CONN_HANDLE_INVALID;
+static uint16_t m_conn_host = BLE_CONN_HANDLE_INVALID;
 
 //****************************************** Mine
 #include "venti.h"
@@ -225,11 +226,20 @@ static void record_read_file(uint16_t fileID, uint16_t recordKey) {
         }
     }
     printf("Sent: %s\n\r", data_flash_send_to_phone);
-
-    ret_code_t err_code = ble_nus_data_send(&m_nus, data_flash_send_to_phone, &bufferIndex, m_conn_handle);
-    if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
-    {
-        APP_ERROR_CHECK(err_code);
+    ret_code_t err_code;
+    if(m_conn_handle != BLE_CONN_HANDLE_INVALID) {
+        err_code = ble_nus_data_send(&m_nus, data_flash_send_to_phone, &bufferIndex, m_conn_handle);
+        if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+        {
+            APP_ERROR_CHECK(err_code);
+        }
+    }
+    if(m_conn_relay != BLE_CONN_HANDLE_INVALID) {
+        err_code = ble_nus_data_send(&m_nus, data_flash_send_to_phone, &bufferIndex, m_conn_relay);
+        if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+        {
+            APP_ERROR_CHECK(err_code);
+        }
     }
 }
 
@@ -344,7 +354,7 @@ static void print_all_cmd()
 
 
 NRF_BLE_GATT_DEF(m_gatt);                                                       /**< GATT module instance. */
-NRF_BLE_QWR_DEF(m_qwr);                                                         /**< Context for the Queued Write module.*/
+NRF_BLE_QWRS_DEF(m_qwr, NRF_SDH_BLE_TOTAL_LINK_COUNT);                                                         /**< Context for the Queued Write module.*/
 BLE_ADVERTISING_DEF(m_advertising);                                             /**< Advertising module instance. */
 
 
@@ -570,6 +580,11 @@ static void gap_params_init(void)
 void gatt_evt_handler(nrf_ble_gatt_t * p_gatt, nrf_ble_gatt_evt_t const * p_evt)
 {
     if ((m_conn_handle == p_evt->conn_handle) && (p_evt->evt_id == NRF_BLE_GATT_EVT_ATT_MTU_UPDATED))
+    {
+        m_ble_nus_max_data_len = p_evt->params.att_mtu_effective - OPCODE_LENGTH - HANDLE_LENGTH;
+        NRF_LOG_INFO("Data len is set to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
+    }
+    else if ((m_conn_relay == p_evt->conn_handle) && (p_evt->evt_id == NRF_BLE_GATT_EVT_ATT_MTU_UPDATED))
     {
         m_ble_nus_max_data_len = p_evt->params.att_mtu_effective - OPCODE_LENGTH - HANDLE_LENGTH;
         NRF_LOG_INFO("Data len is set to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
@@ -817,11 +832,21 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
             float current_temp = ds18b20_read_temp();
             sprintf(data_array, "%fC", current_temp);
             printf("Read temperature as: %f\n", current_temp);
-            err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
-            if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
-            {
-                APP_ERROR_CHECK(err_code);
+            if(m_conn_handle != BLE_CONN_HANDLE_INVALID) {
+                err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
+                if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+                {
+                    APP_ERROR_CHECK(err_code);
+                }
             }
+            if(m_conn_relay != BLE_CONN_HANDLE_INVALID) {
+                err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_relay);
+                if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+                {
+                    APP_ERROR_CHECK(err_code);
+                }
+            }
+            
         }
         
         //Set a schedule
@@ -928,7 +953,13 @@ static void services_init(void)
 
     //Initialize Queued Write Module.
     qwr_init.error_handler = nrf_qwr_error_handler;
-    err_code = nrf_ble_qwr_init(&m_qwr, &qwr_init);
+
+    for (uint32_t i = 0; i < NRF_SDH_BLE_PERIPHERAL_LINK_COUNT +  NRF_SDH_BLE_CENTRAL_LINK_COUNT; i++)
+    {
+        err_code = nrf_ble_qwr_init(&m_qwr[i], &qwr_init);
+        APP_ERROR_CHECK(err_code);
+    }
+
     APP_ERROR_CHECK(err_code);
     
     //Initialize LED service
@@ -1009,7 +1040,7 @@ static void on_conn_params_evt(ble_conn_params_evt_t * p_evt)
 
     if (p_evt->evt_type == BLE_CONN_PARAMS_EVT_FAILED)
     {
-        err_code = sd_ble_gap_disconnect(m_conn_handle, BLE_HCI_CONN_INTERVAL_UNACCEPTABLE);
+        err_code = sd_ble_gap_disconnect(p_evt->conn_handle, BLE_HCI_CONN_INTERVAL_UNACCEPTABLE);
         APP_ERROR_CHECK(err_code);
     }
 }
@@ -1154,6 +1185,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 {
     ret_code_t err_code = NRF_SUCCESS;
     ble_gap_evt_t const * p_gap_evt = &p_ble_evt->evt.gap_evt;
+    uint16_t evt_conn_handle =  p_ble_evt->evt.gap_evt.conn_handle;
    
 
     if(p_gap_evt->params.connected.role == BLE_GAP_ROLE_PERIPH) {
@@ -1168,6 +1200,12 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
         case BLE_GAP_EVT_DISCONNECTED:
             NRF_LOG_INFO("Disconnected.");
             // LED indication will be changed when advertising starts.
+            if (m_conn_handle==evt_conn_handle) {
+                m_conn_handle = BLE_CONN_HANDLE_INVALID;
+            }
+            else if (m_conn_relay==evt_conn_handle) {
+                m_conn_relay = BLE_CONN_HANDLE_INVALID;
+            }
             break;
 
         case BLE_GAP_EVT_TIMEOUT:
@@ -1191,6 +1229,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             break;
 
         case BLE_GAP_EVT_CONNECTED:
+
             //printf("Connected.");
             if (p_gap_evt->params.connected.role == BLE_GAP_ROLE_CENTRAL) {
                 err_code = ble_nus_c_handles_assign(&m_ble_nus_c, p_ble_evt->evt.gap_evt.conn_handle, NULL);
@@ -1203,12 +1242,32 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                 err_code = ble_db_discovery_start(&m_db_disc, p_ble_evt->evt.gap_evt.conn_handle);
                 APP_ERROR_CHECK(err_code);
             }
-            else {
+            else if(p_gap_evt->params.connected.role == BLE_GAP_ROLE_PERIPH) {
                 err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
                 APP_ERROR_CHECK(err_code);
-                m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
-                err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
-                APP_ERROR_CHECK(err_code);
+                uint32_t periph_link_cnt = ble_conn_state_peripheral_conn_count();
+                
+                // Assign connection handle to available instance of QWR module.
+                for (uint32_t i = 0; i < NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++)
+                {
+                    if (m_qwr[i].conn_handle == BLE_CONN_HANDLE_INVALID)
+                    {
+                        if(i) {
+                            m_conn_relay = evt_conn_handle;
+                       
+                        }
+                        else {
+                             m_conn_handle = evt_conn_handle;
+                        }
+                        err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr[i], evt_conn_handle);
+                        APP_ERROR_CHECK(err_code);
+                        break;
+                    }
+                }
+                if(periph_link_cnt != NRF_SDH_BLE_PERIPHERAL_LINK_COUNT) {
+                    advertising_start();
+                }
+                break;
             }
             
             break;
@@ -1605,11 +1664,18 @@ static void scan_init(void)
     APP_ERROR_CHECK(err_code);
 
 
-    err_code = nrf_ble_scan_filter_set(&m_scan, SCAN_UUID_FILTER, &m_nus_uuid);
+    //err_code = nrf_ble_scan_filter_set(&m_scan, SCAN_UUID_FILTER, &m_nus_uuid);
+    //APP_ERROR_CHECK(err_code);
+
+    //err_code = nrf_ble_scan_filters_enable(&m_scan, NRF_BLE_SCAN_UUID_FILTER, false);
+    //APP_ERROR_CHECK(err_code);
+    
+    err_code = nrf_ble_scan_filter_set(&m_scan, SCAN_NAME_FILTER, RIGHT_NAME);
     APP_ERROR_CHECK(err_code);
 
-    err_code = nrf_ble_scan_filters_enable(&m_scan, NRF_BLE_SCAN_UUID_FILTER, false);
+    err_code = nrf_ble_scan_filters_enable(&m_scan, NRF_BLE_SCAN_NAME_FILTER, false);
     APP_ERROR_CHECK(err_code);
+    
 }
 
 
