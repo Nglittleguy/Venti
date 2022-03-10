@@ -37,8 +37,9 @@
 #include "ble_nus_c.h"
 #include "nrf_ble_scan.h"
 
-
-static uint16_t m_conn_handle;
+//static uint16_t m_conn_handle = BLE_CONN_HANDLE_INVALID;                        /**< Handle of the current connection. */
+static uint16_t m_conn_relay = BLE_CONN_HANDLE_INVALID;
+static uint16_t m_conn_handles[NRF_SDH_BLE_PERIPHERAL_LINK_COUNT] = {BLE_CONN_HANDLE_INVALID};
 
 //****************************************** Mine
 #include "venti.h"
@@ -99,12 +100,12 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
 
         case FDS_EVT_WRITE:
         {
-            if (p_evt->result == NRF_SUCCESS)
-            {
-                NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->write.record_id);
-                NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->write.file_id);
-                NRF_LOG_INFO("Record key:\t0x%04x", p_evt->write.record_key);
-            }
+            //if (p_evt->result == NRF_SUCCESS)
+            //{
+            //    NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->write.record_id);
+            //    NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->write.file_id);
+            //    NRF_LOG_INFO("Record key:\t0x%04x", p_evt->write.record_key);
+            //}
             if(to_write_voltage) {
                 record_day_voltage();
             }
@@ -112,12 +113,12 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
 
         case FDS_EVT_DEL_RECORD:
         {
-            if (p_evt->result == NRF_SUCCESS)
-            {
-                NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->del.record_id);
-                NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->del.file_id);
-                NRF_LOG_INFO("Record key:\t0x%04x", p_evt->del.record_key);
-            }
+            //if (p_evt->result == NRF_SUCCESS)
+            //{
+            //    NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->del.record_id);
+            //    NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->del.file_id);
+            //    NRF_LOG_INFO("Record key:\t0x%04x", p_evt->del.record_key);
+            //}
             m_delete_all.pending = false;
         } break;
 
@@ -193,7 +194,7 @@ static void flash_storage_init() {
 }
 
 
-static void record_read_file(uint16_t fileID, uint16_t recordKey) {
+static void record_read_file(uint16_t fileID, uint16_t recordKey, uint16_t conn_to_send, bool from_central) {
     NRF_LOG_INFO("Trying to read");
     fds_find_token_t tok   = {0};
     fds_record_desc_t desc = {0};
@@ -226,11 +227,27 @@ static void record_read_file(uint16_t fileID, uint16_t recordKey) {
     }
     printf("Sent: %s\n\r", data_flash_send_to_phone);
 
-    ret_code_t err_code = ble_nus_data_send(&m_nus, data_flash_send_to_phone, &bufferIndex, m_conn_handle);
-    if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
-    {
-        APP_ERROR_CHECK(err_code);
+    ret_code_t err_code;
+
+    if(from_central) {
+        ble_nus_c_string_send(&m_ble_nus_c, data_flash_send_to_phone, bufferIndex);
+        if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+        {
+            APP_ERROR_CHECK(err_code);
+        }
     }
+    else {
+        for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+            if(m_conn_handles[i] == conn_to_send) {
+                err_code = ble_nus_data_send(&m_nus, data_flash_send_to_phone, &bufferIndex, m_conn_handles[i]);
+                if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+                {
+                    APP_ERROR_CHECK(err_code);
+                }
+            }
+        }
+    }
+    
 }
 
 static void record_write(uint32_t fid, uint32_t key, void const * p_data, uint32_t len)
@@ -312,10 +329,7 @@ static void print_all_cmd()
 
 //******************************************
 
-
-
-#define DEVICE_NAME                     "Nordic Relay 32"                       /**< Name of device. Will be included in the advertising data. */
-#define MANUFACTURER_NAME               "NordicSemiconductor"                   /**< Manufacturer. Will be passed to Device Information Service. */
+#define MANUFACTURER_NAME               "SmartLabs"                             /**< Manufacturer. Will be passed to Device Information Service. */
 #define APP_ADV_INTERVAL                300                                     /**< The advertising interval (in units of 0.625 ms. This value corresponds to 187.5 ms). */
 
 #define APP_ADV_DURATION                0 //Continue advertising (18000 default)        /**< The advertising duration (180 seconds) in units of 10 milliseconds. */
@@ -344,19 +358,12 @@ static void print_all_cmd()
 
 
 NRF_BLE_GATT_DEF(m_gatt);                                                       /**< GATT module instance. */
-NRF_BLE_QWR_DEF(m_qwr);                                                         /**< Context for the Queued Write module.*/
+NRF_BLE_QWRS_DEF(m_qwr, NRF_SDH_BLE_TOTAL_LINK_COUNT);                                                         /**< Context for the Queued Write module.*/
 BLE_ADVERTISING_DEF(m_advertising);                                             /**< Advertising module instance. */
-
-
-BLE_NUS_C_DEF(m_ble_nus_c);                                             /**< BLE Nordic UART Service (NUS) client instance. */
-BLE_DB_DISCOVERY_DEF(m_db_disc);                                        /**< Database discovery module instance. */
-NRF_BLE_SCAN_DEF(m_scan);                                               /**< Scanning Module instance. */
 
 NRF_BLE_GQ_DEF(m_ble_gatt_queue, NRF_SDH_BLE_CENTRAL_LINK_COUNT, NRF_BLE_GQ_QUEUE_SIZE);   /**< BLE GATT Queue instance. */
    
 
-
-static uint16_t m_conn_handle = BLE_CONN_HANDLE_INVALID;                        /**< Handle of the current connection. */
 
 
 
@@ -407,7 +414,8 @@ static void battery_level_update(void)
     battery_level = battery_level_in_percent(vbatt);
     printf("ADC result %d, in percent: %d\r\n", vbatt, battery_level);
 
-    err_code = ble_bas_battery_level_update(&m_bas, battery_level, m_conn_handle);
+    
+    err_code = ble_bas_battery_level_update(&m_bas, battery_level, m_conn_handles[0]);
     if((err_code != NRF_SUCCESS) && (err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING))
         APP_ERROR_HANDLER(err_code);
 }
@@ -418,7 +426,7 @@ static void battery_level_meas_timeout_handler(void * p_context)
     UNUSED_PARAMETER(p_context);
     printf("Battery Level Timeout Event");
 
-    if(m_conn_handle != BLE_CONN_HANDLE_INVALID)
+    if(m_conn_handles[0] != BLE_CONN_HANDLE_INVALID)
         battery_level_update();
 }
 
@@ -483,10 +491,21 @@ static void time_segment_timeout_handler(void *p_context)
     if(checkSchedule(current_time_segment)) {
         NRF_LOG_INFO("Schedule rotated the vent");
     }
+}
 
-
-
-
+static void relay(char* msg) {
+    NRF_LOG_INFO("Current Central Conn Handle: %x", m_ble_nus_c.conn_handle);
+    if(m_ble_nus_c.conn_handle!= BLE_CONN_HANDLE_INVALID) {
+        NRF_LOG_INFO("Sending: %s", msg);
+        uint8_t msg_len = strlen(msg);
+        NRF_LOG_INFO("Sending Length: %d", msg_len);
+        ret_code_t ret_val = ble_nus_c_string_send(&m_ble_nus_c, msg, msg_len);
+        
+        if ( (ret_val != NRF_ERROR_INVALID_STATE) && (ret_val != NRF_ERROR_RESOURCES) )
+        {
+            APP_ERROR_CHECK(ret_val);
+        }
+    }
 }
 
 
@@ -560,11 +579,13 @@ static void gap_params_init(void)
 /**@brief Function for handling events from the GATT library. */
 void gatt_evt_handler(nrf_ble_gatt_t * p_gatt, nrf_ble_gatt_evt_t const * p_evt)
 {
-    if ((m_conn_handle == p_evt->conn_handle) && (p_evt->evt_id == NRF_BLE_GATT_EVT_ATT_MTU_UPDATED))
-    {
-        m_ble_nus_max_data_len = p_evt->params.att_mtu_effective - OPCODE_LENGTH - HANDLE_LENGTH;
-        NRF_LOG_INFO("Data len is set to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
+    for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+        if(m_conn_handles[i] == p_evt->conn_handle && (p_evt->evt_id == NRF_BLE_GATT_EVT_ATT_MTU_UPDATED)) {
+            m_ble_nus_max_data_len = p_evt->params.att_mtu_effective - OPCODE_LENGTH - HANDLE_LENGTH;
+            NRF_LOG_INFO("Data len is set to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
+        }
     }
+
     NRF_LOG_DEBUG("ATT MTU exchange completed. central 0x%x peripheral 0x%x",
                   p_gatt->att_mtu_desired_central,
                   p_gatt->att_mtu_desired_periph);
@@ -751,6 +772,212 @@ static void uart_init(void)
 /**@snippet [UART Initialization] */
 
 
+static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t conn_to, bool from_central) {
+    uint32_t err_code;
+
+    memset(data_read, '\0', 32);
+    for (uint32_t i = 0; i < data_len && i < 32; i++) {
+        data_read[i] = data_in[i];
+    }
+
+    if(strcmp(data_read, "on")==0) {
+        flipLights(true);
+    }
+    else if(strcmp(data_read, "off")==0) {
+        flipLights(false);
+    }
+    else if(strcmp(data_read, "left")==0) {
+        NRF_LOG_INFO("left");
+        rotateCCWHalf();
+    }
+    else if(strcmp(data_read, "right")==0) {
+        NRF_LOG_INFO("right");
+        rotateCWHalf();
+    }
+    //else if(strcmp(data_read, "read")==0) {
+    //    record_read();
+    //}
+    //else if(strcmp(data_read, "write")==0) {
+    //    record_day_voltage();
+    //}
+
+    //Open The vent to an amount
+    else if(strncmp(data_read, "open", 4)==0) {
+        uint8_t target = (uint8_t) atoi(data_read+5);
+        printf("Rotate to %d", target);
+        rotate(target);
+    }
+
+    //Read the current temperature
+    else if(strcmp(data_read, "temp")==0) {
+        char data_array[10];
+        uint16_t length = (uint16_t)10;
+        float current_temp = ds18b20_read_temp();
+        sprintf(data_array, "%fC", current_temp);
+        printf("Read temperature as: %f\n", current_temp);
+
+        if(from_central) {
+            ble_nus_c_string_send(&m_ble_nus_c, data_array, length);
+            if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+            {
+                APP_ERROR_CHECK(err_code);
+            }
+        }
+        else {
+            for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+                if(m_conn_handles[i] == conn_to) {
+                    err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handles[i]);
+                    if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+                    {
+                        APP_ERROR_CHECK(err_code);
+                    }
+                }
+            }
+        }
+        
+    }
+    
+    //Set a schedule
+    else if(strncmp(data_read, "schedule", 8)==0) {
+        char *ptr = strtok(data_read, " ");
+
+        ptr = strtok(NULL, " ");
+        uint8_t slot = atoi(ptr);
+       
+        ptr = strtok(NULL, " ");
+        uint16_t time = atoi(ptr);
+
+        ptr = strtok(NULL, " ");
+        uint16_t amount = atoi(ptr);
+
+        printf("Received Scheduling: %d, %d, %d\n\r", slot, time, amount);
+        addToSchedule(slot, time, amount);
+        printSchedule();
+    }
+
+    //Read a record
+    else if(strncmp(data_read, "read", 4)==0) {
+        char *ptr = strtok(data_read, " ");
+
+        ptr = strtok(NULL, " ");
+        uint8_t fileID = atoi(ptr);
+       
+        ptr = strtok(NULL, " ");
+        uint16_t recordKey = atoi(ptr);
+
+        printf("Received Read of File: %d, %d\n\r", fileID, recordKey);
+        record_read_file(fileID, recordKey, conn_to, from_central);
+    }
+
+    //Relay Message
+    else if(strncmp(data_read, "relay", 5)==0) {
+        char *msg = data_read+5;
+        printf("Relaying Message %s", msg);
+        if(!from_central) {
+            relay(msg);
+        }
+        
+    }
+
+    else if(strncmp(data_read, "r", 1)==0) {
+        uint8_t target = (uint8_t) atoi(data_read+2);
+        rotateCW(target);
+    }
+
+    else if(strncmp(data_read, "l", 1)==0) {
+        uint8_t target = (uint8_t) atoi(data_read+2);
+        rotateCCW(target);
+    }
+
+    //Don't actually need to output to UART, just read in
+    /*
+    for (uint32_t i = 0; i < p_evt->params.rx_data.length; i++)
+    {
+        do
+        {
+            err_code = app_uart_put(p_evt->params.rx_data.p_data[i]);
+            if ((err_code != NRF_SUCCESS) && (err_code != NRF_ERROR_BUSY))
+            {
+                NRF_LOG_ERROR("Failed receiving NUS message. Error 0x%x. ", err_code);
+                APP_ERROR_CHECK(err_code);
+            }
+        } while (err_code == NRF_ERROR_BUSY);
+    }
+    if (p_evt->params.rx_data.p_data[p_evt->params.rx_data.length - 1] == '\r')
+    {
+        while (app_uart_put('\n') == NRF_ERROR_BUSY);
+    }
+    */
+    
+    //Set up relay
+    else if((strcmp(data_read, "@@@@")==0 && !from_central)) {
+        m_conn_relay = conn_to;
+        NRF_LOG_INFO("Conn Handle of Relaying Node is %d", m_conn_relay);
+    }
+
+    //Coded Input 'id@cmd@param'
+    else if(data_read[2]=='@' && data_read[6]=='@') {
+
+        char *ptr = strtok(data_read, " ");
+        uint8_t recipientID = atoi(ptr);
+
+        //check to see if this device is the intended recipient, if not, relay
+        if(DEVICE_ID != recipientID) {
+
+            //attempt to send to central connection
+            if(!from_central) {
+                relay(data_read);
+            }
+        
+            //if recipient is 0, then send to all connected except sender
+            if(recipientID == 0) {
+                for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+                    if(m_conn_handles[i] != conn_to) {
+                        err_code = ble_nus_data_send(&m_nus, data_read, &data_len, m_conn_handles[i]);
+                        if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+                        {
+                            APP_ERROR_CHECK(err_code);
+                        }
+                    }
+                }
+            }
+
+            //if not from RIGHT relay node, send to RIGHT relay node (continue relay forward)
+            else if(m_conn_relay != BLE_CONN_HANDLE_INVALID && m_conn_relay !=  conn_to) {
+            
+                err_code = ble_nus_data_send(&m_nus, data_read, &data_len, m_conn_relay);
+                if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+                {
+                    APP_ERROR_CHECK(err_code);
+                }
+            }
+        }
+
+        //Intended for this device
+        else {
+            //ptr = strtok(NULL, " ");
+            //uint8_t fileID = atoi(ptr);
+
+            //ptr = strtok(NULL, " ");
+            //uint16_t recordKey = atoi(ptr);
+
+            //printf("Received Read of File: %d, %d\n\r", fileID, recordKey);
+            //record_read_file(fileID, recordKey, p_evt->conn_handle);
+            NRF_LOG_INFO("Sending back to you");
+            for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+                if(m_conn_handles[i] != conn_to) {
+                    err_code = ble_nus_data_send(&m_nus, data_read, &data_len, m_conn_handles[i]);
+                    if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+                    {
+                        APP_ERROR_CHECK(err_code);
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 /**@brief Function for handling the data from the Nordic UART Service.
  *
  * @details This function will process the data received from the Nordic UART BLE Service and send
@@ -768,103 +995,7 @@ static void nus_data_handler(ble_nus_evt_t * p_evt)
         NRF_LOG_DEBUG("Received data from BLE NUS. Writing data on UART.");
         NRF_LOG_HEXDUMP_DEBUG(p_evt->params.rx_data.p_data, p_evt->params.rx_data.length);
 
-        memset(data_read, '\0', 32);
-        for (uint32_t i = 0; i < p_evt->params.rx_data.length && i < 32; i++) {
-            data_read[i] = p_evt->params.rx_data.p_data[i];
-        }
-
-        if(strcmp(data_read, "on")==0) {
-            flipLights(true);
-        }
-        else if(strcmp(data_read, "off")==0) {
-            flipLights(false);
-        }
-        else if(strcmp(data_read, "left")==0) {
-            NRF_LOG_INFO("left");
-            rotateCCWHalf();
-        }
-        else if(strcmp(data_read, "right")==0) {
-            NRF_LOG_INFO("right");
-            rotateCWHalf();
-        }
-        //else if(strcmp(data_read, "read")==0) {
-        //    record_read();
-        //}
-        else if(strcmp(data_read, "write")==0) {
-            record_day_voltage();
-        }
-
-        //Open The vent to an amount
-        else if(strncmp(data_read, "open", 4)==0) {
-            uint8_t target = (uint8_t) atoi(data_read+5);
-            printf("Rotate to %d", target);
-            rotate(target);
-        }
-
-        //Read the current temperature
-        else if(strcmp(data_read, "temp")==0) {
-            char data_array[10];
-            uint16_t length = (uint16_t)10;
-            float current_temp = ds18b20_read_temp();
-            sprintf(data_array, "%fC", current_temp);
-            printf("Read temperature as: %f\n", current_temp);
-            err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
-            if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
-            {
-                APP_ERROR_CHECK(err_code);
-            }
-        }
-        
-        //Set a schedule
-        else if(strncmp(data_read, "schedule", 8)==0) {
-            char *ptr = strtok(data_read, " ");
-
-            ptr = strtok(NULL, " ");
-            uint8_t slot = atoi(ptr);
-           
-            ptr = strtok(NULL, " ");
-            uint16_t time = atoi(ptr);
-
-            ptr = strtok(NULL, " ");
-            uint16_t amount = atoi(ptr);
-
-            printf("Received Scheduling: %d, %d, %d\n\r", slot, time, amount);
-            addToSchedule(slot, time, amount);
-            printSchedule();
-        }
-
-        else if(strncmp(data_read, "read", 4)==0) {
-            char *ptr = strtok(data_read, " ");
-
-            ptr = strtok(NULL, " ");
-            uint8_t fileID = atoi(ptr);
-           
-            ptr = strtok(NULL, " ");
-            uint16_t recordKey = atoi(ptr);
-
-            printf("Received Read of File: %d, %d\n\r", fileID, recordKey);
-            record_read_file(fileID, recordKey);
-        }
-
-        //Don't actually need to output to UART, just read in
-        /*
-        for (uint32_t i = 0; i < p_evt->params.rx_data.length; i++)
-        {
-            do
-            {
-                err_code = app_uart_put(p_evt->params.rx_data.p_data[i]);
-                if ((err_code != NRF_SUCCESS) && (err_code != NRF_ERROR_BUSY))
-                {
-                    NRF_LOG_ERROR("Failed receiving NUS message. Error 0x%x. ", err_code);
-                    APP_ERROR_CHECK(err_code);
-                }
-            } while (err_code == NRF_ERROR_BUSY);
-        }
-        if (p_evt->params.rx_data.p_data[p_evt->params.rx_data.length - 1] == '\r')
-        {
-            while (app_uart_put('\n') == NRF_ERROR_BUSY);
-        }
-        */
+        msg_received(p_evt->params.rx_data.p_data, p_evt->params.rx_data.length, p_evt->conn_handle, false);
     }
 
 }
@@ -911,7 +1042,13 @@ static void services_init(void)
 
     //Initialize Queued Write Module.
     qwr_init.error_handler = nrf_qwr_error_handler;
-    err_code = nrf_ble_qwr_init(&m_qwr, &qwr_init);
+
+    for (uint32_t i = 0; i < NRF_SDH_BLE_PERIPHERAL_LINK_COUNT +  NRF_SDH_BLE_CENTRAL_LINK_COUNT; i++)
+    {
+        err_code = nrf_ble_qwr_init(&m_qwr[i], &qwr_init);
+        APP_ERROR_CHECK(err_code);
+    }
+
     APP_ERROR_CHECK(err_code);
     
     //Initialize LED service
@@ -992,7 +1129,7 @@ static void on_conn_params_evt(ble_conn_params_evt_t * p_evt)
 
     if (p_evt->evt_type == BLE_CONN_PARAMS_EVT_FAILED)
     {
-        err_code = sd_ble_gap_disconnect(m_conn_handle, BLE_HCI_CONN_INTERVAL_UNACCEPTABLE);
+        err_code = sd_ble_gap_disconnect(p_evt->conn_handle, BLE_HCI_CONN_INTERVAL_UNACCEPTABLE);
         APP_ERROR_CHECK(err_code);
     }
 }
@@ -1137,20 +1274,21 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 {
     ret_code_t err_code = NRF_SUCCESS;
     ble_gap_evt_t const * p_gap_evt = &p_ble_evt->evt.gap_evt;
-   
-
-    if(p_gap_evt->params.connected.role == BLE_GAP_ROLE_PERIPH) {
-        NRF_LOG_INFO("Peripheral Role Event %d", p_gap_evt->conn_handle);
-    }
-    else if (p_gap_evt->params.connected.role == BLE_GAP_ROLE_CENTRAL) {
-        NRF_LOG_INFO("Central Role Event %d", p_gap_evt->conn_handle);
-    }
+    uint16_t evt_conn_handle =  p_ble_evt->evt.gap_evt.conn_handle;
 
     switch (p_ble_evt->header.evt_id)
     {
         case BLE_GAP_EVT_DISCONNECTED:
             NRF_LOG_INFO("Disconnected.");
             // LED indication will be changed when advertising starts.
+            for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+                if(m_conn_handles[i] == evt_conn_handle) {
+                    m_conn_handles[i] = BLE_CONN_HANDLE_INVALID;
+                }
+            }
+            if(m_conn_relay == evt_conn_handle) {
+                m_conn_relay = BLE_CONN_HANDLE_INVALID;
+            }
             break;
 
         case BLE_GAP_EVT_TIMEOUT:
@@ -1174,6 +1312,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             break;
 
         case BLE_GAP_EVT_CONNECTED:
+
             //printf("Connected.");
             if (p_gap_evt->params.connected.role == BLE_GAP_ROLE_CENTRAL) {
                 err_code = ble_nus_c_handles_assign(&m_ble_nus_c, p_ble_evt->evt.gap_evt.conn_handle, NULL);
@@ -1186,12 +1325,34 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
                 err_code = ble_db_discovery_start(&m_db_disc, p_ble_evt->evt.gap_evt.conn_handle);
                 APP_ERROR_CHECK(err_code);
             }
-            else {
+            else if(p_gap_evt->params.connected.role == BLE_GAP_ROLE_PERIPH) {
                 err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
                 APP_ERROR_CHECK(err_code);
-                m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
-                err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
-                APP_ERROR_CHECK(err_code);
+                uint32_t periph_link_cnt = ble_conn_state_peripheral_conn_count();
+                ble_gap_evt_adv_report_t p_connected = p_gap_evt->params.adv_report;
+                
+                NRF_LOG_INFO("Connecting to %x", p_connected.peer_addr.addr);
+                
+                // Assign connection handle to available instance of QWR module.
+                for (uint32_t i = 0; i < NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++)
+                {
+                    if (m_qwr[i].conn_handle == BLE_CONN_HANDLE_INVALID)
+                    {
+                        err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr[i], evt_conn_handle);
+                        APP_ERROR_CHECK(err_code);
+                        break;
+                    }
+                }
+
+                for (int i = 0; i < NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+                    if (m_conn_handles[i] == BLE_CONN_HANDLE_INVALID) {
+                        m_conn_handles[i] = evt_conn_handle;
+                    }
+                }
+                if(periph_link_cnt != NRF_SDH_BLE_PERIPHERAL_LINK_COUNT) {
+                    advertising_start();
+                }
+                break;
             }
             
             break;
@@ -1280,12 +1441,17 @@ static void bsp_event_handler(bsp_event_t event)
             break; // BSP_EVENT_SLEEP
 
         case BSP_EVENT_DISCONNECT:
-            err_code = sd_ble_gap_disconnect(m_conn_handle,
-                                             BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
-            if (err_code != NRF_ERROR_INVALID_STATE)
-            {
-                APP_ERROR_CHECK(err_code);
+            for (int i = 0; i < NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+                if (m_conn_handles[i] != BLE_CONN_HANDLE_INVALID) {
+                    err_code = sd_ble_gap_disconnect(m_conn_handles[i], BLE_HCI_REMOTE_USER_TERMINATED_CONNECTION);
+                }
+
+                if (err_code != NRF_ERROR_INVALID_STATE)
+                {
+                    APP_ERROR_CHECK(err_code);
+                }
             }
+            
             break; // BSP_EVENT_DISCONNECT
 
         //case BSP_EVENT_WHITELIST_OFF:
@@ -1321,7 +1487,7 @@ static void bsp_event_handler(bsp_event_t event)
         //      {
         //        APP_ERROR_CHECK(err_code);
         //      }
-        //    } while (err_code == NRF_ERROR_RESOURCES);
+        //    } while (err_code == NRF_ERROR_RESOURCESt;
         //break;
         //case BSP_EVENT_KEY_3:
         // NRF_LOG_INFO("4 pressed\n");
@@ -1483,18 +1649,20 @@ static void ble_nus_chars_received_uart_print(uint8_t * p_data, uint16_t data_le
     NRF_LOG_DEBUG("Receiving data.");
     NRF_LOG_HEXDUMP_DEBUG(p_data, data_len);
 
-    for (uint32_t i = 0; i < data_len; i++)
-    {
-        do
-        {
-            ret_val = app_uart_put(p_data[i]);
-            if ((ret_val != NRF_SUCCESS) && (ret_val != NRF_ERROR_BUSY))
-            {
-                NRF_LOG_ERROR("app_uart_put failed for index 0x%04x.", i);
-                APP_ERROR_CHECK(ret_val);
-            }
-        } while (ret_val == NRF_ERROR_BUSY);
-    }
+
+    //for (uint32_t i = 0; i < data_len; i++)
+    //{
+    //    do
+    //    {
+    //        ret_val = app_uart_put(p_data[i]);
+    //        if ((ret_val != NRF_SUCCESS) && (ret_val != NRF_ERROR_BUSY))
+    //        {
+    //            NRF_LOG_ERROR("app_uart_put failed for index 0x%04x.", i);
+    //            APP_ERROR_CHECK(ret_val);
+    //        }
+    //    } while (ret_val == NRF_ERROR_BUSY);
+    //}
+
     if (p_data[data_len-1] == '\r')
     {
         while (app_uart_put('\n') == NRF_ERROR_BUSY);
@@ -1533,7 +1701,6 @@ static void scan_start(void)
 static void scan_evt_handler(scan_evt_t const * p_scan_evt)
 {
     ret_code_t err_code;
-    NRF_LOG_INFO("Scan Event Occurred");
     
     switch(p_scan_evt->scan_evt_id)
     {
@@ -1586,11 +1753,18 @@ static void scan_init(void)
     APP_ERROR_CHECK(err_code);
 
 
-    err_code = nrf_ble_scan_filter_set(&m_scan, SCAN_UUID_FILTER, &m_nus_uuid);
+    //err_code = nrf_ble_scan_filter_set(&m_scan, SCAN_UUID_FILTER, &m_nus_uuid);
+    //APP_ERROR_CHECK(err_code);
+
+    //err_code = nrf_ble_scan_filters_enable(&m_scan, NRF_BLE_SCAN_UUID_FILTER, false);
+    //APP_ERROR_CHECK(err_code);
+    
+    err_code = nrf_ble_scan_filter_set(&m_scan, SCAN_NAME_FILTER, RIGHT_NAME);
     APP_ERROR_CHECK(err_code);
 
-    err_code = nrf_ble_scan_filters_enable(&m_scan, NRF_BLE_SCAN_UUID_FILTER, false);
+    err_code = nrf_ble_scan_filters_enable(&m_scan, NRF_BLE_SCAN_NAME_FILTER, false);
     APP_ERROR_CHECK(err_code);
+    
 }
 
 
@@ -1617,6 +1791,10 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
             err_code = ble_nus_c_tx_notif_enable(p_ble_nus_c);
             APP_ERROR_CHECK(err_code);
             NRF_LOG_INFO("Connected to device with Nordic UART Service.");
+
+            char* connect_msg = "@@@@";
+            uint16_t connect_msg_len = sizeof(connect_msg);
+            ble_nus_c_string_send(&m_ble_nus_c, connect_msg, connect_msg_len);
             break;
 
         case BLE_NUS_C_EVT_NUS_TX_EVT:
@@ -1625,7 +1803,18 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
             //    NRF_LOG_INFO("Receiving Information From Relay");
             //    m_on_data_received(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
             //}
-            ble_nus_chars_received_uart_print(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
+            NRF_LOG_INFO("Received data from peripheral.");
+            uint16_t len = p_ble_nus_evt->data_len;
+            
+            for (int i = 0; i < NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+                if (m_conn_handles[i] != BLE_CONN_HANDLE_INVALID) {
+                    ble_nus_data_send(&m_nus, p_ble_nus_evt->p_data, &len, m_conn_handles[i]); //Send to phone
+                }
+            }
+
+            msg_received(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len, p_ble_nus_evt->conn_handle, true);
+
+            //ble_nus_chars_received_uart_print(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
             break;
 
         case BLE_NUS_C_EVT_DISCONNECTED:
@@ -1668,8 +1857,8 @@ void app_nus_client_init()
 int main(void)
 {
     bool erase_bonds;
-
     
+
     // Initialize.
     log_init();
     timers_init();
@@ -1692,7 +1881,6 @@ int main(void)
 
 //    // Start execution.
     printf("My Test App Started.");
-    application_timers_start();
 
     advertising_start();
     app_nus_client_init();

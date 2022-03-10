@@ -328,7 +328,7 @@
 
 // <o> NRF_BLE_SCAN_NAME_CNT - Number of name filters. 
 #ifndef NRF_BLE_SCAN_NAME_CNT
-#define NRF_BLE_SCAN_NAME_CNT 0
+#define NRF_BLE_SCAN_NAME_CNT 1
 #endif
 
 // <o> NRF_BLE_SCAN_SHORT_NAME_CNT - Number of short name filters. 
@@ -11520,7 +11520,7 @@
 
 // <o> NRF_SDH_BLE_PERIPHERAL_LINK_COUNT - Maximum number of peripheral links. 
 #ifndef NRF_SDH_BLE_PERIPHERAL_LINK_COUNT
-#define NRF_SDH_BLE_PERIPHERAL_LINK_COUNT 1
+#define NRF_SDH_BLE_PERIPHERAL_LINK_COUNT 3
 #endif
 
 // <o> NRF_SDH_BLE_CENTRAL_LINK_COUNT - Maximum number of central links. 
@@ -11532,7 +11532,7 @@
 // <i> Maximum number of total concurrent connections using the default configuration.
 
 #ifndef NRF_SDH_BLE_TOTAL_LINK_COUNT
-#define NRF_SDH_BLE_TOTAL_LINK_COUNT 2
+#define NRF_SDH_BLE_TOTAL_LINK_COUNT 4
 #endif
 
 // <o> NRF_SDH_BLE_GAP_EVENT_LENGTH - GAP event length. 
@@ -12011,44 +12011,44 @@
 //==========================================================
 // <o> NRF_SDH_CLOCK_LF_SRC  - SoftDevice clock source.
  
-// <0=> NRF_CLOCK_LF_SRC_RC 
-// <1=> NRF_CLOCK_LF_SRC_XTAL 
+// <0=> NRF_CLOCK_LF_SRC_RC  - for without external clock
+// <1=> NRF_CLOCK_LF_SRC_XTAL - for with crystal clock (Dev Kit)
 // <2=> NRF_CLOCK_LF_SRC_SYNTH 
 
 #ifndef NRF_SDH_CLOCK_LF_SRC
-#define NRF_SDH_CLOCK_LF_SRC 1
+#define NRF_SDH_CLOCK_LF_SRC 0
 #endif
 
-// <o> NRF_SDH_CLOCK_LF_RC_CTIV - SoftDevice calibration timer interval. 
+// <o> NRF_SDH_CLOCK_LF_RC_CTIV - SoftDevice calibration timer interval. 0 for crystal, 16 for RC
 #ifndef NRF_SDH_CLOCK_LF_RC_CTIV
-#define NRF_SDH_CLOCK_LF_RC_CTIV 0
+#define NRF_SDH_CLOCK_LF_RC_CTIV 16
 #endif
 
 // <o> NRF_SDH_CLOCK_LF_RC_TEMP_CTIV - SoftDevice calibration timer interval under constant temperature. 
 // <i> How often (in number of calibration intervals) the RC oscillator shall be calibrated
-// <i>  if the temperature has not changed.
+// <i>  if the temperature has not changed. - For RC, 2; for Crystal, 0.
 
 #ifndef NRF_SDH_CLOCK_LF_RC_TEMP_CTIV
-#define NRF_SDH_CLOCK_LF_RC_TEMP_CTIV 0
+#define NRF_SDH_CLOCK_LF_RC_TEMP_CTIV 2
 #endif
 
 // <o> NRF_SDH_CLOCK_LF_ACCURACY  - External clock accuracy used in the LL to compute timing.
  
-// <0=> NRF_CLOCK_LF_ACCURACY_250_PPM 
+// <0=> NRF_CLOCK_LF_ACCURACY_250_PPM (for RC)
 // <1=> NRF_CLOCK_LF_ACCURACY_500_PPM 
 // <2=> NRF_CLOCK_LF_ACCURACY_150_PPM 
 // <3=> NRF_CLOCK_LF_ACCURACY_100_PPM 
 // <4=> NRF_CLOCK_LF_ACCURACY_75_PPM 
 // <5=> NRF_CLOCK_LF_ACCURACY_50_PPM 
 // <6=> NRF_CLOCK_LF_ACCURACY_30_PPM 
-// <7=> NRF_CLOCK_LF_ACCURACY_20_PPM 
+// <7=> NRF_CLOCK_LF_ACCURACY_20_PPM  (for external crystal clock)
 // <8=> NRF_CLOCK_LF_ACCURACY_10_PPM 
 // <9=> NRF_CLOCK_LF_ACCURACY_5_PPM 
 // <10=> NRF_CLOCK_LF_ACCURACY_2_PPM 
 // <11=> NRF_CLOCK_LF_ACCURACY_1_PPM 
 
 #ifndef NRF_SDH_CLOCK_LF_ACCURACY
-#define NRF_SDH_CLOCK_LF_ACCURACY 7
+#define NRF_SDH_CLOCK_LF_ACCURACY 1
 #endif
 
 // </h> 
