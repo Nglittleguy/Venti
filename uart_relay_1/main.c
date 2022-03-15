@@ -59,9 +59,13 @@ uint16_t dataFileRecord = 1;                  //Can't be 0x0000
 bool to_write_voltage = false;
 
 uint8_t data_read[32] = {0};
+uint8_t data_read_buf[32] = {0};
 uint8_t data_cmp[32] = {0};
 uint8_t data_flash[32] = {0};
 uint8_t data_flash_send_to_phone[768] = {0};
+uint8_t return_buf[32] = {0};
+
+uint16_t return_len = 0;
 
 //Buffer to write to flash (asynchronous) must not be on stack
 static char flash_write_buf[32];
@@ -494,7 +498,7 @@ static void time_segment_timeout_handler(void *p_context)
 }
 
 static void relay(char* msg) {
-    NRF_LOG_INFO("Current Central Conn Handle: %x", m_ble_nus_c.conn_handle);
+    //NRF_LOG_INFO("Current Central Conn Handle: %x", m_ble_nus_c.conn_handle);
     if(m_ble_nus_c.conn_handle!= BLE_CONN_HANDLE_INVALID) {
         NRF_LOG_INFO("Sending: %s", msg);
         uint8_t msg_len = strlen(msg);
@@ -507,7 +511,6 @@ static void relay(char* msg) {
         }
     }
 }
-
 
 
 /**@brief Function for the Timer initialization.
@@ -774,15 +777,16 @@ static void uart_init(void)
 
 static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t conn_to, bool from_central) {
     uint32_t err_code;
+    ble_conn_state_conn_handle_list_t conn_handles = ble_conn_state_periph_handles();
 
     memset(data_read, '\0', 32);
     for (uint32_t i = 0; i < data_len && i < 32; i++) {
         data_read[i] = data_in[i];
     }
-
+    
     if(strcmp(data_read, "on")==0) {
         flipLights(true);
-    }
+    }/*
     else if(strcmp(data_read, "off")==0) {
         flipLights(false);
     }
@@ -888,6 +892,7 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
         uint8_t target = (uint8_t) atoi(data_read+2);
         rotateCCW(target);
     }
+    */
 
     //Don't actually need to output to UART, just read in
     /*
@@ -917,8 +922,9 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
 
     //Coded Input 'id@cmd@param'
     else if(data_read[2]=='@' && data_read[6]=='@') {
-
-        char *ptr = strtok(data_read, " ");
+        memset(data_read_buf, 0, 32);
+        memcpy(data_read_buf, data_read, 32);
+        char *ptr = strtok(data_read, "@");
         uint8_t recipientID = atoi(ptr);
 
         //check to see if this device is the intended recipient, if not, relay
@@ -926,26 +932,30 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
 
             //attempt to send to central connection
             if(!from_central) {
-                relay(data_read);
+                relay(data_read_buf);
             }
         
             //if recipient is 0, then send to all connected except sender
             if(recipientID == 0) {
-                for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
-                    if(m_conn_handles[i] != conn_to) {
-                        err_code = ble_nus_data_send(&m_nus, data_read, &data_len, m_conn_handles[i]);
+                for(int i = 0; i<conn_handles.len; i++) {
+                    if(conn_handles.conn_handles[i] != conn_to) {
+                        err_code = ble_nus_data_send(&m_nus, data_read_buf, &data_len, conn_handles.conn_handles[i]);
+                        NRF_LOG_INFO("Sending to %d", i);
                         if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
                         {
                             APP_ERROR_CHECK(err_code);
+                        }
+                        if (err_code==NRF_ERROR_RESOURCES) {
+                            i--;
                         }
                     }
                 }
             }
 
             //if not from RIGHT relay node, send to RIGHT relay node (continue relay forward)
-            else if(m_conn_relay != BLE_CONN_HANDLE_INVALID && m_conn_relay !=  conn_to) {
+            else if(m_conn_relay != BLE_CONN_HANDLE_INVALID && m_conn_relay != conn_to) {
             
-                err_code = ble_nus_data_send(&m_nus, data_read, &data_len, m_conn_relay);
+                err_code = ble_nus_data_send(&m_nus, data_read_buf, &data_len, m_conn_relay);
                 if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
                 {
                     APP_ERROR_CHECK(err_code);
@@ -955,22 +965,59 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
 
         //Intended for this device
         else {
-            //ptr = strtok(NULL, " ");
-            //uint8_t fileID = atoi(ptr);
+            ptr = strtok(NULL, "@");
+            uint16_t instr_code = atoi(ptr);
 
-            //ptr = strtok(NULL, " ");
-            //uint16_t recordKey = atoi(ptr);
+            memset(return_buf, 0, 32);
+            return_len = 0;
+            
+            //INSTRUCTION HANDLING HERE
+            //-------------------------------------------------------------
 
-            //printf("Received Read of File: %d, %d\n\r", fileID, recordKey);
-            //record_read_file(fileID, recordKey, p_evt->conn_handle);
-            NRF_LOG_INFO("Sending back to you");
-            for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
-                if(m_conn_handles[i] != conn_to) {
-                    err_code = ble_nus_data_send(&m_nus, data_read, &data_len, m_conn_handles[i]);
-                    if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
-                    {
-                        APP_ERROR_CHECK(err_code);
-                    }
+            //Request Battery Voltage (returns id@510@voltage_in_mV#)
+            if(instr_code == 510) {
+                uint16_t vbatt;
+                battery_voltage_get(&vbatt);
+                sprintf(return_buf, "00@515@%d#", vbatt);
+            }
+
+            //Request Temperature (returns id@535@temperature_in_C#)
+            else if(instr_code == 530) {
+                float current_temp = ds18b20_read_temp();
+                sprintf(return_buf, "00@535@%f#", current_temp);
+            }
+
+            //Request Open Amount (returns id@605@open_amount_max_255#)
+            else if(instr_code == 600) {
+                sprintf(return_buf, "00@605@%d#", getOpenAmount());
+            }
+
+            //Request Open Vent to Amount (returns id@625#) - would recommend sending back amount as well 
+            else if(instr_code == 620) {
+                ptr = strtok(NULL, "@");
+                uint8_t target_open = atoi(ptr);
+                rotate(target_open);
+                sprintf(return_buf, "00@625@#");
+            }
+
+            // END INSTRUCTION HANDLING ----------------------------------
+            
+            return_len = strlen(return_buf);
+
+            //Send response back to central connection
+            if(from_central) {
+                err_code = ble_nus_c_string_send(&m_ble_nus_c, return_buf, return_len);
+                if ( (err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) )
+                {
+                    APP_ERROR_CHECK(err_code);
+                }
+            }
+            //Send response back to peripheral connection
+            else {
+                err_code = ble_nus_data_send(&m_nus, return_buf, &return_len, conn_to);
+                if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+                {
+                    APP_ERROR_CHECK(err_code);
                 }
             }
         }
@@ -1798,19 +1845,15 @@ static void ble_nus_c_evt_handler(ble_nus_c_t * p_ble_nus_c, ble_nus_c_evt_t con
             break;
 
         case BLE_NUS_C_EVT_NUS_TX_EVT:
-            //if(m_on_data_received)
-            //{
-            //    NRF_LOG_INFO("Receiving Information From Relay");
-            //    m_on_data_received(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len);
-            //}
+
             NRF_LOG_INFO("Received data from peripheral.");
             uint16_t len = p_ble_nus_evt->data_len;
             
-            for (int i = 0; i < NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
-                if (m_conn_handles[i] != BLE_CONN_HANDLE_INVALID) {
-                    ble_nus_data_send(&m_nus, p_ble_nus_evt->p_data, &len, m_conn_handles[i]); //Send to phone
-                }
-            }
+            //for (int i = 0; i < NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+            //    if (m_conn_handles[i] != BLE_CONN_HANDLE_INVALID) {
+            //        ble_nus_data_send(&m_nus, p_ble_nus_evt->p_data, &len, m_conn_handles[i]); //Send to phone
+            //    }
+            //}
 
             msg_received(p_ble_nus_evt->p_data, p_ble_nus_evt->data_len, p_ble_nus_evt->conn_handle, true);
 
