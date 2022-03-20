@@ -4,7 +4,7 @@
 //////////////////////////////////////////////////////////////////////////////////
 //Relaying Services
 
-#define DEVICE_ID     2                 /**< ID of Device for Relaying. */
+#define DEVICE_ID     1                 /**< ID of Device for Relaying. */
 
 #if DEVICE_ID == 1
 #define DEVICE_NAME   "S-Vent 1"        /**< Name of device. Will be included in the advertising data. */
@@ -149,7 +149,9 @@ static uint16_t m_ble_nus_max_data_len = BLE_GATT_ATT_MTU_DEFAULT - OPCODE_LENGT
 
 #define STEPCOUNT 1024
 #define STEPDELAY 10
-#define MOTORBASEPIN 11
+#define MOTORBASEPIN 11             //Deprecated, use motor_pins instead
+
+static const uint8_t motor_pins[4] = {11, 12, 13, 14};
 
 static const bool motor_reset[4] = {1,0,0,1};
 
@@ -184,6 +186,9 @@ void rotateCW(short amount);
 void rotateCCW(short amount);
 
 void rotate(uint8_t val);
+
+uint8_t getOpenAmount();
+
 #endif
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -211,8 +216,8 @@ typedef struct
 
 }Schedule_event;
 
-static const char daysOfWeek[7][10] = {"Monday", "Tuesday", "Wednesday",
-    "Thursday", "Friday", "Saturday", "Sunday"};
+static const char daysOfWeek[7][10] = {"Sunday", "Monday", "Tuesday", "Wednesday",
+    "Thursday", "Friday", "Saturday"};
 
 extern Schedule_event schedule[7][5];
 
@@ -220,7 +225,8 @@ void initSchedule();
 void printSchedule();
 void addToSchedule(uint8_t slot, uint16_t time, uint8_t amount);
 void currentTimeFromSegment(char* buf, uint16_t time_segment);
-
+void sendSchedule(uint8_t weekday, char* buf);
+void setSchedule(uint8_t weekday, uint16_t* timeArr, uint8_t* amountArr);
 
 /////////////////////////////////////////////////////////////////////////////////
 //Timer For Events

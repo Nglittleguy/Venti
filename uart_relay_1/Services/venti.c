@@ -108,7 +108,7 @@ void flipLights(bool turnOn) {
 
 void bsp_board_motor_init(void) {
     for(int i = 0; i<4; i++) {
-        nrf_gpio_cfg_output(MOTORBASEPIN+i);
+        nrf_gpio_cfg_output(motor_pins[i]);
     }
 }
 
@@ -116,15 +116,15 @@ void reset_motor() {
     //Set the motor to the same start state
     for(int pinI = 0; pinI < 4; pinI++) {
         if(motor_reset[pinI])
-           nrf_gpio_pin_set(MOTORBASEPIN+pinI);
+           nrf_gpio_pin_set(motor_pins[pinI]);
         else 
-           nrf_gpio_pin_clear(MOTORBASEPIN+pinI);
+           nrf_gpio_pin_clear(motor_pins[pinI]);
     }
 }
 
 void zeroMotor() {
     for(int pinI = 0; pinI<4; pinI++) {
-        nrf_gpio_pin_clear(MOTORBASEPIN+pinI);
+        nrf_gpio_pin_clear(motor_pins[pinI]);
     }
 }
 
@@ -133,9 +133,9 @@ void rotateCWHalf() {
     for(int step = 0; step<STEPCOUNT; step++) {
         for(int pinI = 0; pinI < 4; pinI++) {
             if(cw_seq[step%4][pinI])
-                nrf_gpio_pin_set(MOTORBASEPIN+pinI);
+                nrf_gpio_pin_set(motor_pins[pinI]);
             else 
-                nrf_gpio_pin_clear(MOTORBASEPIN+pinI);
+                nrf_gpio_pin_clear(motor_pins[pinI]);
         }
         nrf_delay_ms(STEPDELAY);
     }
@@ -149,9 +149,9 @@ void rotateCCWHalf() {
     //The CCW pattern must be set backwards... for some reason
         for(int pinI = 0; pinI <4; pinI++) {
             if(ccw_seq[step%4][pinI])
-                nrf_gpio_pin_set(MOTORBASEPIN+pinI);
+                nrf_gpio_pin_set(motor_pins[pinI]);
             else 
-                nrf_gpio_pin_clear(MOTORBASEPIN+pinI);
+                nrf_gpio_pin_clear(motor_pins[pinI]);
         }
         nrf_delay_ms(STEPDELAY);
     }
@@ -167,9 +167,9 @@ void rotateCW(short amount) {
     for(int step = 0; step<(amount<<1); step++) {
         for(int pinI = 0; pinI < 4; pinI++) {
             if(cw_seq[step%4][pinI])
-                nrf_gpio_pin_set(MOTORBASEPIN+pinI);
+                nrf_gpio_pin_set(motor_pins[pinI]);
             else 
-                nrf_gpio_pin_clear(MOTORBASEPIN+pinI);
+                nrf_gpio_pin_clear(motor_pins[pinI]);
         }
         nrf_delay_ms(STEPDELAY);
     }
@@ -183,9 +183,9 @@ void rotateCCW(short amount) {
     //The CCW pattern must be set backwards... for some reason
         for(int pinI = 0; pinI < 4; pinI++) {
             if(ccw_seq[step%4][pinI])
-                nrf_gpio_pin_set(MOTORBASEPIN+pinI);
+                nrf_gpio_pin_set(motor_pins[pinI]);
             else 
-                nrf_gpio_pin_clear(MOTORBASEPIN+pinI);
+                nrf_gpio_pin_clear(motor_pins[pinI]);
         }
         nrf_delay_ms(STEPDELAY);
     }
@@ -204,6 +204,9 @@ void rotate(uint8_t target_open_amount) {
     }
 }
 
+uint8_t getOpenAmount() {
+    return current_open_amount;;
+}
 
 /////////////////////////////////////////////////////////////////////////////////
 //Temperature Sensor - https://github.com/DSysoletin/nrf52_ds18b20_example/blob/master/main.c
@@ -390,6 +393,23 @@ void printSchedule() {
     }
 }
 
+void sendSchedule(uint8_t weekday, char* buf) {
+    sprintf(buf, "00@%d@%d|%d,%d|%d,%d|%d,%d|%d,%d|%d#", weekday+711, 
+      schedule[weekday][0].time, schedule[weekday][0].amount, 
+      schedule[weekday][1].time, schedule[weekday][1].amount,
+      schedule[weekday][2].time, schedule[weekday][2].amount,
+      schedule[weekday][3].time, schedule[weekday][3].amount,
+      schedule[weekday][4].time, schedule[weekday][4].amount);
+}
+
+void setSchedule(uint8_t weekday, uint16_t* timeArr, uint8_t* amountArr) {
+    for(int i = 0; i<5; i++) {
+        schedule[weekday][i].time = timeArr[i];
+        schedule[weekday][i].amount = amountArr[i];
+        
+    }
+    
+}
 
 void currentTimeFromSegment(char* buf, uint16_t time_segment) {
     if(time_segment>2015) {
