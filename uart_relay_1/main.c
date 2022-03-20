@@ -58,12 +58,12 @@ uint16_t dataFileRecord = 1;                  //Can't be 0x0000
 
 bool to_write_voltage = false;
 
-uint8_t data_read[32] = {0};
-uint8_t data_read_buf[32] = {0};
+uint8_t data_read[200] = {0};
+uint8_t data_read_buf[200] = {0};
 uint8_t data_cmp[32] = {0};
 uint8_t data_flash[32] = {0};
 uint8_t data_flash_send_to_phone[768] = {0};
-uint8_t return_buf[32] = {0};
+uint8_t return_buf[200] = {0};
 
 uint16_t return_len = 0;
 
@@ -779,120 +779,121 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
     uint32_t err_code;
     ble_conn_state_conn_handle_list_t conn_handles = ble_conn_state_periph_handles();
 
-    memset(data_read, '\0', 32);
-    for (uint32_t i = 0; i < data_len && i < 32; i++) {
+    memset(data_read, '\0', 200);
+    for (uint32_t i = 0; i < data_len && i < 200; i++) {
         data_read[i] = data_in[i];
     }
     
-    if(strcmp(data_read, "on")==0) {
+    if(strcmp(data_read, "on")==0 || strcmp(data_read, "o")==0) {
         flipLights(true);
-    }/*
-    else if(strcmp(data_read, "off")==0) {
-        flipLights(false);
     }
-    else if(strcmp(data_read, "left")==0) {
-        NRF_LOG_INFO("left");
-        rotateCCWHalf();
-    }
-    else if(strcmp(data_read, "right")==0) {
-        NRF_LOG_INFO("right");
-        rotateCWHalf();
-    }
-    //else if(strcmp(data_read, "read")==0) {
-    //    record_read();
+    /*
+    //else if(strcmp(data_read, "off")==0) {
+    //    flipLights(false);
     //}
-    //else if(strcmp(data_read, "write")==0) {
-    //    record_day_voltage();
+    //else if(strcmp(data_read, "left")==0) {
+    //    NRF_LOG_INFO("left");
+    //    rotateCCWHalf();
+    //}*/
+    //else if(strcmp(data_read, "r")==0) {
+    //    NRF_LOG_INFO("right");
+    //    rotateCWHalf();
+    //}
+    ////else if(strcmp(data_read, "read")==0) {
+    ////    record_read();
+    ////}
+    ////else if(strcmp(data_read, "write")==0) {
+    ////    record_day_voltage();
+    ////}
+
+    ////Open The vent to an amount
+    //else if(strncmp(data_read, "open", 4)==0) {
+    //    uint8_t target = (uint8_t) atoi(data_read+5);
+    //    printf("Rotate to %d", target);
+    //    rotate(target);
     //}
 
-    //Open The vent to an amount
-    else if(strncmp(data_read, "open", 4)==0) {
-        uint8_t target = (uint8_t) atoi(data_read+5);
-        printf("Rotate to %d", target);
-        rotate(target);
-    }
+    ////Read the current temperature
+    //else if(strcmp(data_read, "temp")==0) {
+    //    char data_array[10];
+    //    uint16_t length = (uint16_t)10;
+    //    float current_temp = ds18b20_read_temp();
+    //    sprintf(data_array, "%fC", current_temp);
+    //    printf("Read temperature as: %f\n", current_temp);
 
-    //Read the current temperature
-    else if(strcmp(data_read, "temp")==0) {
-        char data_array[10];
-        uint16_t length = (uint16_t)10;
-        float current_temp = ds18b20_read_temp();
-        sprintf(data_array, "%fC", current_temp);
-        printf("Read temperature as: %f\n", current_temp);
-
-        if(from_central) {
-            ble_nus_c_string_send(&m_ble_nus_c, data_array, length);
-            if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
-            {
-                APP_ERROR_CHECK(err_code);
-            }
-        }
-        else {
-            for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
-                if(m_conn_handles[i] == conn_to) {
-                    err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handles[i]);
-                    if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
-                    {
-                        APP_ERROR_CHECK(err_code);
-                    }
-                }
-            }
-        }
+    //    if(from_central) {
+    //        ble_nus_c_string_send(&m_ble_nus_c, data_array, length);
+    //        if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+    //        {
+    //            APP_ERROR_CHECK(err_code);
+    //        }
+    //    }
+    //    else {
+    //        for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+    //            if(m_conn_handles[i] == conn_to) {
+    //                err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handles[i]);
+    //                if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+    //                {
+    //                    APP_ERROR_CHECK(err_code);
+    //                }
+    //            }
+    //        }
+    //    }
         
-    }
+    //}
     
-    //Set a schedule
-    else if(strncmp(data_read, "schedule", 8)==0) {
-        char *ptr = strtok(data_read, " ");
+    ////Set a schedule
+    //else if(strncmp(data_read, "schedule", 8)==0) {
+    //    char *ptr = strtok(data_read, " ");
 
-        ptr = strtok(NULL, " ");
-        uint8_t slot = atoi(ptr);
+    //    ptr = strtok(NULL, " ");
+    //    uint8_t slot = atoi(ptr);
        
-        ptr = strtok(NULL, " ");
-        uint16_t time = atoi(ptr);
+    //    ptr = strtok(NULL, " ");
+    //    uint16_t time = atoi(ptr);
 
-        ptr = strtok(NULL, " ");
-        uint16_t amount = atoi(ptr);
+    //    ptr = strtok(NULL, " ");
+    //    uint16_t amount = atoi(ptr);
 
-        printf("Received Scheduling: %d, %d, %d\n\r", slot, time, amount);
-        addToSchedule(slot, time, amount);
-        printSchedule();
-    }
+    //    printf("Received Scheduling: %d, %d, %d\n\r", slot, time, amount);
+    //    addToSchedule(slot, time, amount);
+    //    printSchedule();
+    //}
 
-    //Read a record
-    else if(strncmp(data_read, "read", 4)==0) {
-        char *ptr = strtok(data_read, " ");
+    ////Read a record
+    //else if(strncmp(data_read, "read", 4)==0) {
+    //    char *ptr = strtok(data_read, " ");
 
-        ptr = strtok(NULL, " ");
-        uint8_t fileID = atoi(ptr);
+    //    ptr = strtok(NULL, " ");
+    //    uint8_t fileID = atoi(ptr);
        
-        ptr = strtok(NULL, " ");
-        uint16_t recordKey = atoi(ptr);
+    //    ptr = strtok(NULL, " ");
+    //    uint16_t recordKey = atoi(ptr);
 
-        printf("Received Read of File: %d, %d\n\r", fileID, recordKey);
-        record_read_file(fileID, recordKey, conn_to, from_central);
-    }
+    //    printf("Received Read of File: %d, %d\n\r", fileID, recordKey);
+    //    record_read_file(fileID, recordKey, conn_to, from_central);
+    //}
 
-    //Relay Message
-    else if(strncmp(data_read, "relay", 5)==0) {
-        char *msg = data_read+5;
-        printf("Relaying Message %s", msg);
-        if(!from_central) {
-            relay(msg);
-        }
+    ////Relay Message
+    //else if(strncmp(data_read, "relay", 5)==0) {
+    //    char *msg = data_read+5;
+    //    printf("Relaying Message %s", msg);
+    //    if(!from_central) {
+    //        relay(msg);
+    //    }
         
-    }
+    //}
 
-    else if(strncmp(data_read, "r", 1)==0) {
-        uint8_t target = (uint8_t) atoi(data_read+2);
-        rotateCW(target);
-    }
+    //else if(strncmp(data_read, "r", 1)==0) {
+    //    uint8_t target = (uint8_t) atoi(data_read+2);
+    //    rotateCW(target);
+    //}
 
-    else if(strncmp(data_read, "l", 1)==0) {
-        uint8_t target = (uint8_t) atoi(data_read+2);
-        rotateCCW(target);
-    }
-    */
+    //else if(strncmp(data_read, "l", 1)==0) {
+    //    uint8_t target = (uint8_t) atoi(data_read+2);
+    //    rotateCCW(target);
+    //}
+    
 
     //Don't actually need to output to UART, just read in
     /*
@@ -922,8 +923,8 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
 
     //Coded Input 'id@cmd@param'
     else if(data_read[2]=='@' && data_read[6]=='@') {
-        memset(data_read_buf, 0, 32);
-        memcpy(data_read_buf, data_read, 32);
+        memset(data_read_buf, 0, 200);
+        memcpy(data_read_buf, data_read, 200);
         char *ptr = strtok(data_read, "@");
         uint8_t recipientID = atoi(ptr);
 
@@ -968,7 +969,7 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
             ptr = strtok(NULL, "@");
             uint16_t instr_code = atoi(ptr);
 
-            memset(return_buf, 0, 32);
+            memset(return_buf, 0, 200);
             return_len = 0;
             
             //INSTRUCTION HANDLING HERE
@@ -994,10 +995,38 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
 
             //Request Open Vent to Amount (returns id@625#) - would recommend sending back amount as well 
             else if(instr_code == 620) {
-                ptr = strtok(NULL, "@");
+                ptr = strtok(NULL, "|");
                 uint8_t target_open = atoi(ptr);
                 rotate(target_open);
                 sprintf(return_buf, "00@625@#");
+            }
+
+            //Request Schedules per Weekday (returns id@instr_code@time_segment|amount,time_segment|amount...#)
+            else if(instr_code >= 711 && instr_code <= 717) {
+                uint8_t weekday = instr_code-711;
+                sendSchedule(weekday, return_buf);
+                printf(return_buf);
+            }
+            
+            //Request to Set Schedule per Weekday (returns id@instr_code@#)
+            else if(instr_code >= 721 && instr_code <= 727) {
+                uint8_t weekday = instr_code-721;
+                uint16_t timeArr[5] = {9999};
+                uint8_t amountArr[5] = {255};
+                for(int i = 0; i<5; i++) {
+                    ptr = strtok(NULL, "|");
+                    if (ptr!=NULL) {
+                        timeArr[i] = atoi(ptr);
+                        printf("%s ", ptr);
+                    }
+                    ptr = strtok(NULL, ",#");
+                    if (ptr!=NULL) {
+                        amountArr[i] = atoi(ptr);
+                    }
+                    printf("time %d, amount %d\n\r", timeArr[i], amountArr[i]);
+                }
+                setSchedule(weekday, timeArr, amountArr);
+                sprintf(return_buf, "00@%d@#", weekday+721);
             }
 
             // END INSTRUCTION HANDLING ----------------------------------
@@ -1512,42 +1541,42 @@ static void bsp_event_handler(bsp_event_t event)
         //    }
         //    break; // BSP_EVENT_KEY_0
      
-        //case BSP_EVENT_KEY_1:
-        //    NRF_LOG_INFO("2 pressed\n");
-        //    do {
-        //      uint8_t data_array[10] = "2 pressed\n";
-        //      uint16_t length = (uint16_t)10;
-        //      err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
-        //      if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
-        //      {
-        //        APP_ERROR_CHECK(err_code);
-        //      }
-        //   } while (err_code == NRF_ERROR_RESOURCES);
-        //break;                  
-        //case BSP_EVENT_KEY_2:
-        // NRF_LOG_INFO("3 pressed\n");
-        //    do {
-        //      uint8_t data_array[10] = "3 pressed\n";
-        //      uint16_t length = (uint16_t)10;
-        //      err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
-        //      if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
-        //      {
-        //        APP_ERROR_CHECK(err_code);
-        //      }
-        //    } while (err_code == NRF_ERROR_RESOURCESt;
-        //break;
-        //case BSP_EVENT_KEY_3:
-        // NRF_LOG_INFO("4 pressed\n");
-        //    do {
-        //      uint8_t data_array[10] = "4 pressed\n";
-        //      uint16_t length = (uint16_t)10;
-        //      err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handle);
-        //      if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
-        //      {
-        //        APP_ERROR_CHECK(err_code);
-        //      }
-        //    } while (err_code == NRF_ERROR_RESOURCES);
-        //break;
+        case BSP_EVENT_KEY_1:
+            NRF_LOG_INFO("2 pressed\n");
+            do {
+              uint8_t data_array[10] = "2 pressed\n";
+              uint16_t length = (uint16_t)10;
+              err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handles[0]);
+              if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+              {
+                APP_ERROR_CHECK(err_code);
+              }
+           } while (err_code == NRF_ERROR_RESOURCES);
+        break;                  
+        case BSP_EVENT_KEY_2:
+         NRF_LOG_INFO("3 pressed\n");
+            do {
+              uint8_t data_array[10] = "3 pressed\n";
+              uint16_t length = (uint16_t)10;
+              err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handles[0]);
+              if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+              {
+                APP_ERROR_CHECK(err_code);
+              }
+            } while (err_code == NRF_ERROR_RESOURCES);
+        break;
+        case BSP_EVENT_KEY_3:
+         NRF_LOG_INFO("4 pressed\n");
+            do {
+              uint8_t data_array[10] = "4 pressed\n";
+              uint16_t length = (uint16_t)10;
+              err_code = ble_nus_data_send(&m_nus, data_array, &length, m_conn_handles[0]);
+              if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+              {
+                APP_ERROR_CHECK(err_code);
+              }
+            } while (err_code == NRF_ERROR_RESOURCES);
+        break;
         default:
             break;
     }
