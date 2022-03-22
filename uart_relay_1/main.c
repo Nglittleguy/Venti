@@ -47,10 +47,11 @@ static uint16_t m_conn_handles[NRF_SDH_BLE_PERIPHERAL_LINK_COUNT] = {BLE_CONN_HA
 APP_TIMER_DEF(m_battery_timer_id);
 APP_TIMER_DEF(m_led_blink_id);
 APP_TIMER_DEF(m_time_segment_id);
+APP_TIMER_DEF(m_start_id);
 
 
 static uint32_t current_epoch_sec = 1644351445;
-static uint16_t current_time_segment = 0;     //Mon 12am
+static uint16_t current_time_segment = 0;     //Sun 12am
 
 
 uint16_t dataFileID = 0;                      //Can't be 0xFFFF
@@ -83,14 +84,14 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
 {
     if (p_evt->result == NRF_SUCCESS)
     {
-        NRF_LOG_INFO("Event: %s received (NRF_SUCCESS)",
-                      fds_evt_str[p_evt->id]);
+        //NRF_LOG_INFO("Event: %s received (NRF_SUCCESS)",
+        //              fds_evt_str[p_evt->id]);
     }
     else
     {
-        NRF_LOG_INFO("Event: %s received (%s)",
-                      fds_evt_str[p_evt->id],
-                      fds_err_str(p_evt->result));
+        //NRF_LOG_INFO("Event: %s received (%s)",
+        //              fds_evt_str[p_evt->id],
+        //              fds_err_str(p_evt->result));
     }
 
     switch (p_evt->id)
@@ -111,6 +112,7 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
             //    NRF_LOG_INFO("Record key:\t0x%04x", p_evt->write.record_key);
             //}
             if(to_write_voltage) {
+                to_write_voltage = false;
                 record_day_voltage();
             }
         } break;
@@ -146,8 +148,8 @@ static void flash_storage_init() {
     err= fds_stat(&stat);
     APP_ERROR_CHECK(err);
 
-    NRF_LOG_INFO("Found %d valid records.", stat.valid_records);
-    NRF_LOG_INFO("Found %d dirty records (ready to be garbage collected).", stat.dirty_records);
+    //NRF_LOG_INFO("Found %d valid records.", stat.valid_records);
+    //NRF_LOG_INFO("Found %d dirty records (ready to be garbage collected).", stat.dirty_records);
 
     err = fds_record_find(CONFIG_FILE, CONFIG_REC_KEY, &desc, &tok);
     if(err==NRF_SUCCESS) {
@@ -464,17 +466,27 @@ static void led_blink_timeout_handler(void * p_context)
     
 }
 
+static void application_timers_start(void);
+
+static void start_timeout_handler(void *p_context) {
+    UNUSED_PARAMETER(p_context);
+    NRF_LOG_INFO("Starting APPLICATION TIMERS");
+    application_timers_start();
+}
+
 static void time_segment_timeout_handler(void *p_context)
 {
     UNUSED_PARAMETER(p_context);
     current_time_segment++;
+    current_epoch_sec+=60;
+    
+    NRF_LOG_INFO("TIME SEGMENT CHANGED\r\n");
 
     //New Hour 
     if(current_time_segment % 12 == 0) {
 
         //New Day
         if(current_time_segment % 288 == 0) {
-            current_epoch_sec += 86400;
 
             //New Week, reset to 0
             if(current_time_segment == 2016) {
@@ -500,9 +512,9 @@ static void time_segment_timeout_handler(void *p_context)
 static void relay(char* msg) {
     //NRF_LOG_INFO("Current Central Conn Handle: %x", m_ble_nus_c.conn_handle);
     if(m_ble_nus_c.conn_handle!= BLE_CONN_HANDLE_INVALID) {
-        NRF_LOG_INFO("Sending: %s", msg);
+        //NRF_LOG_INFO("Sending: %s", msg);
         uint8_t msg_len = strlen(msg);
-        NRF_LOG_INFO("Sending Length: %d", msg_len);
+        //NRF_LOG_INFO("Sending Length: %d", msg_len);
         ret_code_t ret_val = ble_nus_c_string_send(&m_ble_nus_c, msg, msg_len);
         
         if ( (ret_val != NRF_ERROR_INVALID_STATE) && (ret_val != NRF_ERROR_RESOURCES) )
@@ -531,6 +543,10 @@ static void timers_init(void)
 
     err_code = app_timer_create(&m_time_segment_id, APP_TIMER_MODE_REPEATED, time_segment_timeout_handler);
     APP_ERROR_CHECK(err_code);
+
+    err_code = app_timer_create(&m_start_id, APP_TIMER_MODE_SINGLE_SHOT, start_timeout_handler);
+    APP_ERROR_CHECK(err_code);
+
 
     // Create timers.
 
@@ -585,7 +601,7 @@ void gatt_evt_handler(nrf_ble_gatt_t * p_gatt, nrf_ble_gatt_evt_t const * p_evt)
     for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
         if(m_conn_handles[i] == p_evt->conn_handle && (p_evt->evt_id == NRF_BLE_GATT_EVT_ATT_MTU_UPDATED)) {
             m_ble_nus_max_data_len = p_evt->params.att_mtu_effective - OPCODE_LENGTH - HANDLE_LENGTH;
-            NRF_LOG_INFO("Data len is set to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
+            //NRF_LOG_INFO("Data len is set to 0x%X(%d)", m_ble_nus_max_data_len, m_ble_nus_max_data_len);
         }
     }
 
@@ -975,11 +991,23 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
             //INSTRUCTION HANDLING HERE
             //-------------------------------------------------------------
 
-            //Request Battery Voltage (returns id@510@voltage_in_mV#)
+            //Request Battery Voltage (returns id@515@voltage_in_mV#)
             if(instr_code == 510) {
                 uint16_t vbatt;
                 battery_voltage_get(&vbatt);
-                sprintf(return_buf, "00@515@%d#", vbatt);
+
+                //Low Battery (returns id@520@voltage_in_mV#)
+                if(vbatt<4000 && !low_battery) {
+                    sprintf(return_buf, "00@520@%d#", vbatt);
+                }
+                //Very Low Battery - Vent is Fully Open "Out of Service"
+                else if(low_battery) {
+                    sprintf(return_buf, "00@525@#", vbatt);
+                }
+                
+                else {
+                    sprintf(return_buf, "00@515@%d#", vbatt);
+                }
             }
 
             //Request Temperature (returns id@535@temperature_in_C#)
@@ -995,10 +1023,15 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
 
             //Request Open Vent to Amount (returns id@625#) - would recommend sending back amount as well 
             else if(instr_code == 620) {
-                ptr = strtok(NULL, "|");
-                uint8_t target_open = atoi(ptr);
-                rotate(target_open);
-                sprintf(return_buf, "00@625@#");
+                if(low_battery) {
+                    sprintf(return_buf, "00@625@LOW#");
+                }
+                else {
+                    ptr = strtok(NULL, "|");
+                    uint8_t target_open = atoi(ptr);
+                    rotate(target_open);
+                    sprintf(return_buf, "00@625@#");
+                }
             }
 
             //Request Schedules per Weekday (returns id@instr_code@time_segment|amount,time_segment|amount...#)
@@ -1027,6 +1060,56 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
                 }
                 setSchedule(weekday, timeArr, amountArr);
                 sprintf(return_buf, "00@%d@#", weekday+721);
+            }
+
+            //Request Initial Set Up of Time (500@DayOfWeek|Hour|Minute|Second|EpochTime#)
+            else if(instr_code == 500) {
+                ptr = strtok(NULL, "|");
+                uint8_t instr_day_of_week = atoi(ptr);
+                ptr = strtok(NULL, "|");
+                uint8_t instr_hour = atoi(ptr);
+                ptr = strtok(NULL, "|");
+                uint8_t instr_minute = atoi(ptr);
+                ptr = strtok(NULL, "|");
+                uint8_t instr_second = atoi(ptr);
+                ptr = strtok(NULL, "#");
+                uint32_t instr_epoch = atoi(ptr);
+
+                if(instr_day_of_week<7 && instr_hour<24 && instr_minute<60 && instr_second<60) {
+
+                    //Find number of seconds until next segment
+                    uint8_t seconds_to_next_minute = 60-instr_second;
+                    uint16_t seconds_to_next_segment = seconds_to_next_minute;
+
+                    if((instr_minute+1)%5!=0) {
+                        seconds_to_next_segment += (5-(instr_minute+1)%5)*60;
+                    }
+                    
+                    current_epoch_sec = instr_epoch + seconds_to_next_segment;
+
+                    //Find Current Time Segment
+                    current_time_segment = 288*instr_day_of_week + 12*instr_hour + (instr_minute/5)+1;
+                    char dateTime[50] = {0};
+                    currentTimeFromSegment(dateTime, current_time_segment);
+                    NRF_LOG_INFO("Current Time Segment Set To %s, Epoch time: %d, Next Start in %d Seconds", dateTime, current_epoch_sec, seconds_to_next_segment);
+
+                    err_code = app_timer_start(m_start_id, APP_TIMER_TICKS(seconds_to_next_segment*1000), NULL);
+                    APP_ERROR_CHECK(err_code);
+
+                    record_day_voltage();
+                    sprintf(return_buf, "00@505@#");
+                }
+                else {
+                    sprintf(return_buf, "00@505@INVALID#");
+                }
+
+            }
+
+            //Request Current Time Segment & Epoch Time
+            else if(instr_code == 507) {
+                char dateTime[50] = {0};
+                currentTimeFromSegment(dateTime, current_time_segment);
+                sprintf(return_buf, "00@508@%d|%s|%d", current_time_segment, dateTime, current_epoch_sec);
             }
 
             // END INSTRUCTION HANDLING ----------------------------------
@@ -1944,18 +2027,16 @@ int main(void)
     services_init();
     advertising_init();
     conn_params_init();
-    application_timers_start();
     bsp_board_motor_init();
     flash_storage_init();
     //print_all_cmd();
-    
-    record_day_voltage();
+   
 
 //    // Start execution.
     printf("My Test App Started.");
 
     advertising_start();
-    app_nus_client_init();
+    //app_nus_client_init();
     
     // Enter main loop.
     for (;;)

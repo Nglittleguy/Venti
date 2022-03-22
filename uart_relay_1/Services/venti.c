@@ -3,6 +3,7 @@
 //////////////////////////////////////////////////////////////////////////////////
 //Battery & Blinking LED Services
 
+bool low_battery = false;
 
 //////////////////////////////////////////////////////////////////////////////////
 //Flash Storage Services
@@ -85,6 +86,12 @@ void setDayVoltageBuffer(char* flash_write_buf, uint32_t epoch) {
     memset(flash_write_buf, 0, 36);
     uint16_t vbatt;
     battery_voltage_get(&vbatt);
+
+    //If battery is less than 3.5V, then open motor, disallow closing
+    if(vbatt < 3500) {
+        low_battery = true;
+        rotate(255);
+    }
     sprintf(flash_write_buf, "Time: %d - %d mV", epoch, vbatt);
 }
 
@@ -331,6 +338,9 @@ bool ds18b20_reset_and_check(void) {
 }
 
 float ds18b20_read_temp(void) {
+    return 8888;   //TESTING, PLEASE REMOVE
+
+
     char t1 = 0, t2 = 0;
     double f;
     uint8_t scratchPad[9];
@@ -459,8 +469,9 @@ bool checkSchedule(uint16_t time_segment) {
     NRF_LOG_INFO("Time is %d", time_segment);
     uint8_t dayOfWeek = time_segment/288;
     bool hasRotated = false;
+
     for(int i = 0; i<5; i++) {
-        if(schedule[dayOfWeek][i].time == time_segment) {
+        if(schedule[dayOfWeek][i].time == time_segment && !low_battery) {
             rotate(schedule[dayOfWeek][i].amount);
             hasRotated = true;
             NRF_LOG_INFO("Rotated to %d at %d following Schedule",

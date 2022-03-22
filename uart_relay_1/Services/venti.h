@@ -114,6 +114,8 @@ void delete_all_process(void);
 
 const char *fds_err_str(ret_code_t ret);
 
+extern bool low_battery;
+
 void setDayVoltageBuffer(char* flash_write_buf, uint32_t epoch);
 void setTemperatureBuffer(char* flash_write_temp, uint16_t segment);
 
@@ -232,7 +234,7 @@ void setSchedule(uint8_t weekday, uint16_t* timeArr, uint8_t* amountArr);
 //Timer For Events
 
 #include "limits.h"
-#define SEGMENT_INTERVAL              APP_TIMER_TICKS(300000)  //300000
+#define SEGMENT_INTERVAL              APP_TIMER_TICKS(10000)  //300000
 
 void resetTemperatureMinMax();
 void compareTemperatureMinMax();
