@@ -238,7 +238,7 @@ void setSchedule(uint8_t weekday, uint16_t* timeArr, uint8_t* amountArr);
 //Timer For Events
 
 #include "limits.h"
-#define SEGMENT_INTERVAL              APP_TIMER_TICKS(10000)  //300000
+#define SEGMENT_INTERVAL              APP_TIMER_TICKS(5000)  //300000
 
 void resetTemperatureMinMax();
 void compareTemperatureMinMax();

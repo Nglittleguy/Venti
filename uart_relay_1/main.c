@@ -55,7 +55,6 @@ static uint16_t current_time_segment = 0;     //Sun 12am
 
 
 uint16_t dataFileID = 0;                      //Can't be 0xFFFF
-uint16_t dataFileRecord = 1;                  //Can't be 0x0000
 
 bool to_write_voltage = false;
 
@@ -69,8 +68,8 @@ uint8_t return_buf[200] = {0};
 uint16_t return_len = 0;
 
 //Buffer to write to flash (asynchronous) must not be on stack
-static char flash_write_buf[64];
-static char flash_write_temp[64];
+static char flash_write_buf[8];
+static char flash_write_temp[8];
 static char flash_write_schedule[128];
 
 static void wait_for_fds_ready() {
@@ -80,6 +79,7 @@ static void wait_for_fds_ready() {
 }
 
 static void record_day_voltage();
+static void record_delete(uint32_t fid, uint32_t key);
 
 static void fds_evt_handler(fds_evt_t const * p_evt)
 {
@@ -120,13 +120,14 @@ static void fds_evt_handler(fds_evt_t const * p_evt)
 
         case FDS_EVT_DEL_RECORD:
         {
-            //if (p_evt->result == NRF_SUCCESS)
-            //{
-            //    NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->del.record_id);
-            //    NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->del.file_id);
-            //    NRF_LOG_INFO("Record key:\t0x%04x", p_evt->del.record_key);
-            //}
+            if (p_evt->result == NRF_SUCCESS)
+            {
+                NRF_LOG_INFO("Record ID:\t0x%04x",  p_evt->del.record_id);
+                NRF_LOG_INFO("File ID:\t0x%04x",    p_evt->del.file_id);
+                NRF_LOG_INFO("Record key:\t0x%04x", p_evt->del.record_key);
+            }
             m_delete_all.pending = false;
+            
         } break;
 
         default:
@@ -340,15 +341,130 @@ static void record_schedule() {
     record_write(SCHEDULE_FLASH_ID, SCHEDULE_FLASH_KEY, &flash_write_schedule, 128);
 }
 
+static void record_read_day(uint16_t fileID, uint16_t conn_to_send, bool from_central) {
+    NRF_LOG_INFO("Trying to read");
+    fds_find_token_t tok   = {0};
+    fds_record_desc_t desc = {0};
+    fds_flash_record_t rec;
+
+    uint16_t bufferIndex = 7, i = 0;
+    memset(data_flash_send_to_phone, 0, 768);
+    sprintf(data_flash_send_to_phone, "00@945@");
+
+    while(fds_record_find(fileID, 0x0001, &desc, &tok)==NRF_SUCCESS) {
+        if(fds_record_open(&desc, &rec)!=NRF_SUCCESS) {
+            NRF_LOG_INFO("Error in opening record");
+        }
+        
+
+        int* raw_data = (int *)rec.p_data;
+        NRF_LOG_INFO("EPOCH SEC IS %d, Voltage is %d\n\r", raw_data[0], raw_data[1]);
+        
+        i = snprintf(NULL, 0, "%d|%d", raw_data[0], raw_data[1]);
+
+        sprintf(data_flash_send_to_phone+bufferIndex, "%d|%d", raw_data[0], raw_data[1]);
+        bufferIndex += i;
+
+        data_flash_send_to_phone[bufferIndex] = '\n';
+        bufferIndex++;
+
+
+        if(fds_record_close(&desc)!=NRF_SUCCESS) {
+            NRF_LOG_INFO("Error in closing record");
+        }
+    }
+    printf("Sent: %s\n\r", data_flash_send_to_phone);
+
+    ret_code_t err_code;
+
+    if(from_central) {
+        ble_nus_c_string_send(&m_ble_nus_c, data_flash_send_to_phone, bufferIndex);
+        if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+        {
+            APP_ERROR_CHECK(err_code);
+        }
+    }
+    else {
+        for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+            if(m_conn_handles[i] == conn_to_send) {
+                err_code = ble_nus_data_send(&m_nus, data_flash_send_to_phone, &bufferIndex, m_conn_handles[i]);
+                if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+                {
+                    APP_ERROR_CHECK(err_code);
+                }
+            }
+        }
+    }
+    
+}
+
+
 static void record_day_voltage() {
     dataFileID++;
     setDayVoltageBuffer(flash_write_buf, current_epoch_sec);
-    record_write(dataFileID, 0x0001, &flash_write_buf, 64);
+    record_write(dataFileID, 0x0001, &flash_write_buf, 8);
+}
+
+static void record_read_temp(uint16_t fileID, uint16_t conn_to_send, bool from_central) {
+    NRF_LOG_INFO("Trying to read");
+    fds_find_token_t tok   = {0};
+    fds_record_desc_t desc = {0};
+    fds_flash_record_t rec;
+
+    uint16_t bufferIndex = 7, i = 0;
+    memset(data_flash_send_to_phone, 0, 768);
+    sprintf(data_flash_send_to_phone, "00@925@");
+
+    while(fds_record_find(fileID, 0x0002, &desc, &tok)==NRF_SUCCESS) {
+        if(fds_record_open(&desc, &rec)!=NRF_SUCCESS) {
+            NRF_LOG_INFO("Error in opening record");
+        }
+        
+
+        short* raw_data = (short *)rec.p_data;
+        NRF_LOG_INFO("TEMP IS: %d: %d - %d\n\r", raw_data[0], raw_data[1], raw_data[2]);
+        
+        i = snprintf(NULL, 0, "%d|%d|%d", raw_data[0], raw_data[1], raw_data[2]);
+
+        sprintf(data_flash_send_to_phone+bufferIndex, "%d|%d|%d", raw_data[0], raw_data[1], raw_data[2]);
+        bufferIndex += i;
+
+        data_flash_send_to_phone[bufferIndex] = '\n';
+        bufferIndex++;
+
+
+        if(fds_record_close(&desc)!=NRF_SUCCESS) {
+            NRF_LOG_INFO("Error in closing record");
+        }
+    }
+    printf("Sent: %s\n\r", data_flash_send_to_phone);
+
+    ret_code_t err_code;
+
+    if(from_central) {
+        ble_nus_c_string_send(&m_ble_nus_c, data_flash_send_to_phone, bufferIndex);
+        if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+        {
+            APP_ERROR_CHECK(err_code);
+        }
+    }
+    else {
+        for(int i = 0; i<NRF_SDH_BLE_PERIPHERAL_LINK_COUNT; i++) {
+            if(m_conn_handles[i] == conn_to_send) {
+                err_code = ble_nus_data_send(&m_nus, data_flash_send_to_phone, &bufferIndex, m_conn_handles[i]);
+                if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+                {
+                    APP_ERROR_CHECK(err_code);
+                }
+            }
+        }
+    }
+    
 }
 
 static void record_temp() {
     setTemperatureBuffer(flash_write_temp, current_time_segment);
-    record_write(dataFileID, 0x0002, &flash_write_temp, 64);
+    record_write(dataFileID, 0x0002, &flash_write_temp, 8);
 }
 
 static void print_all_cmd()
@@ -941,19 +1057,19 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
     //    printSchedule();
     //}
 
-    ////Read a record
-    //else if(strncmp(data_read, "read", 4)==0) {
-    //    char *ptr = strtok(data_read, " ");
+    //Read a record
+    else if(strncmp(data_read, "read", 4)==0) {
+        char *ptr = strtok(data_read, " ");
 
-    //    ptr = strtok(NULL, " ");
-    //    uint8_t fileID = atoi(ptr);
+        ptr = strtok(NULL, " ");
+        uint8_t fileID = atoi(ptr);
        
-    //    ptr = strtok(NULL, " ");
-    //    uint16_t recordKey = atoi(ptr);
+        ptr = strtok(NULL, " ");
+        uint16_t recordKey = atoi(ptr);
 
-    //    printf("Received Read of File: %d, %d\n\r", fileID, recordKey);
-    //    record_read_file(fileID, recordKey, conn_to, from_central);
-    //}
+        printf("Received Read of File: %d, %d\n\r", fileID, recordKey);
+        record_read_file(fileID, recordKey, conn_to, from_central);
+    }
 
     ////Relay Message
     //else if(strncmp(data_read, "relay", 5)==0) {
@@ -1056,8 +1172,58 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
             //INSTRUCTION HANDLING HERE
             //-------------------------------------------------------------
 
+            //Request Initial Set Up of Time (500@DayOfWeek|Hour|Minute|Second|EpochTime#)
+            if(instr_code == 500) {
+                ptr = strtok(NULL, "|");
+                uint8_t instr_day_of_week = atoi(ptr);
+                ptr = strtok(NULL, "|");
+                uint8_t instr_hour = atoi(ptr);
+                ptr = strtok(NULL, "|");
+                uint8_t instr_minute = atoi(ptr);
+                ptr = strtok(NULL, "|");
+                uint8_t instr_second = atoi(ptr);
+                ptr = strtok(NULL, "#");
+                uint32_t instr_epoch = atoi(ptr);
+
+                if(instr_day_of_week<7 && instr_hour<24 && instr_minute<60 && instr_second<60) {
+
+                    //Find number of seconds until next segment
+                    uint8_t seconds_to_next_minute = 60-instr_second;
+                    uint16_t seconds_to_next_segment = seconds_to_next_minute;
+
+                    if((instr_minute+1)%5!=0) {
+                        seconds_to_next_segment += (5-(instr_minute+1)%5)*60;
+                    }
+                    
+                    current_epoch_sec = instr_epoch + seconds_to_next_segment;
+
+                    //Find Current Time Segment
+                    current_time_segment = 288*instr_day_of_week + 12*instr_hour + (instr_minute/5)+1;
+                    char dateTime[50] = {0};
+                    currentTimeFromSegment(dateTime, current_time_segment);
+                    NRF_LOG_INFO("Current Time Segment Set To %s, Epoch time: %d, Next Start in %d Seconds", dateTime, current_epoch_sec, seconds_to_next_segment);
+
+                    err_code = app_timer_start(m_start_id, APP_TIMER_TICKS(seconds_to_next_segment*1000), NULL);
+                    APP_ERROR_CHECK(err_code);
+
+                    record_day_voltage();
+                    sprintf(return_buf, "00@505@%s#", dateTime);
+                }
+                else {
+                    sprintf(return_buf, "00@505@INVALID#");
+                }
+
+            }
+
+            //Request Current Time Segment & Epoch Time
+            else if(instr_code == 507) {
+                char dateTime[50] = {0};
+                currentTimeFromSegment(dateTime, current_time_segment);
+                sprintf(return_buf, "00@508@%d|%s|%d", current_time_segment, dateTime, current_epoch_sec);
+            }
+
             //Request Battery Voltage (returns id@515@voltage_in_mV#)
-            if(instr_code == 510) {
+            else if(instr_code == 510) {
                 uint16_t vbatt;
                 battery_voltage_get(&vbatt);
 
@@ -1092,7 +1258,7 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
                     sprintf(return_buf, "00@625@LOW#");
                 }
                 else {
-                    ptr = strtok(NULL, "|");
+                    ptr = strtok(NULL, "#");
                     uint8_t target_open = atoi(ptr);
                     rotate(target_open);
                     sprintf(return_buf, "00@625@#");
@@ -1139,74 +1305,73 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
                 sprintf(return_buf, "00@765@#");
             }
 
-            //Request Initial Set Up of Time (500@DayOfWeek|Hour|Minute|Second|EpochTime#)
-            else if(instr_code == 500) {
-                ptr = strtok(NULL, "|");
-                uint8_t instr_day_of_week = atoi(ptr);
-                ptr = strtok(NULL, "|");
-                uint8_t instr_hour = atoi(ptr);
-                ptr = strtok(NULL, "|");
-                uint8_t instr_minute = atoi(ptr);
-                ptr = strtok(NULL, "|");
-                uint8_t instr_second = atoi(ptr);
+            //Request Last Day of File ID
+            else if(instr_code == 910) {
+                sprintf(return_buf, "00@915@%d#", dataFileID);
+            }
+
+            //Request Read of Flash File Temperature
+            else if(instr_code == 920) {
                 ptr = strtok(NULL, "#");
-                uint32_t instr_epoch = atoi(ptr);
+                if (ptr!=NULL) {
+                    uint16_t fileID = atoi(ptr);
+                    record_read_temp(fileID, conn_to, from_central);
+                }
+            }
 
-                if(instr_day_of_week<7 && instr_hour<24 && instr_minute<60 && instr_second<60) {
+            //Request Read of Flash File Day & Voltage
+            else if(instr_code == 940) {
+                ptr = strtok(NULL, "#");
+                if (ptr!=NULL) {
+                    uint16_t fileID = atoi(ptr);
+                    record_read_day(fileID, conn_to, from_central);
+                }
+            }
 
-                    //Find number of seconds until next segment
-                    uint8_t seconds_to_next_minute = 60-instr_second;
-                    uint16_t seconds_to_next_segment = seconds_to_next_minute;
-
-                    if((instr_minute+1)%5!=0) {
-                        seconds_to_next_segment += (5-(instr_minute+1)%5)*60;
+            //Request Invalidate Delete of Flash File (Ready for Garbage Collection)
+            else if(instr_code == 950) {
+                ptr = strtok(NULL, "#");
+                if (ptr!=NULL) {
+                    uint16_t fileID = atoi(ptr);
+                    if(fileID == 8888) {
+                        record_delete(SCHEDULE_FLASH_ID, SCHEDULE_FLASH_KEY);
                     }
-                    
-                    current_epoch_sec = instr_epoch + seconds_to_next_segment;
-
-                    //Find Current Time Segment
-                    current_time_segment = 288*instr_day_of_week + 12*instr_hour + (instr_minute/5)+1;
-                    char dateTime[50] = {0};
-                    currentTimeFromSegment(dateTime, current_time_segment);
-                    NRF_LOG_INFO("Current Time Segment Set To %s, Epoch time: %d, Next Start in %d Seconds", dateTime, current_epoch_sec, seconds_to_next_segment);
-
-                    err_code = app_timer_start(m_start_id, APP_TIMER_TICKS(seconds_to_next_segment*1000), NULL);
-                    APP_ERROR_CHECK(err_code);
-
-                    record_day_voltage();
-                    sprintf(return_buf, "00@505@#");
+                    else {
+                        record_delete(fileID, 0x0002);
+                        record_delete(fileID, 0x0001);
+                    }
                 }
-                else {
-                    sprintf(return_buf, "00@505@INVALID#");
-                }
-
+                sprintf(return_buf, "00@955@#");
             }
 
-            //Request Current Time Segment & Epoch Time
-            else if(instr_code == 507) {
-                char dateTime[50] = {0};
-                currentTimeFromSegment(dateTime, current_time_segment);
-                sprintf(return_buf, "00@508@%d|%s|%d", current_time_segment, dateTime, current_epoch_sec);
+            //Request Garbage Collection of Flash Files
+            else if(instr_code == 990) {
+                fds_garbage_collection();
+                sprintf(return_buf, "00@995@#");
             }
+
+            
 
             // END INSTRUCTION HANDLING ----------------------------------
             
             return_len = strlen(return_buf);
 
-            //Send response back to central connection
-            if(from_central) {
-                err_code = ble_nus_c_string_send(&m_ble_nus_c, return_buf, return_len);
-                if ( (err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) )
-                {
-                    APP_ERROR_CHECK(err_code);
+            if(return_len > 0) {
+                //Send response back to central connection
+                if(from_central) {
+                    err_code = ble_nus_c_string_send(&m_ble_nus_c, return_buf, return_len);
+                    if ( (err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) )
+                    {
+                        APP_ERROR_CHECK(err_code);
+                    }
                 }
-            }
-            //Send response back to peripheral connection
-            else {
-                err_code = ble_nus_data_send(&m_nus, return_buf, &return_len, conn_to);
-                if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
-                {
-                    APP_ERROR_CHECK(err_code);
+                //Send response back to peripheral connection
+                else {
+                    err_code = ble_nus_data_send(&m_nus, return_buf, &return_len, conn_to);
+                    if ((err_code != NRF_ERROR_INVALID_STATE) && (err_code != NRF_ERROR_RESOURCES) && (err_code != NRF_ERROR_NOT_FOUND))
+                    {
+                        APP_ERROR_CHECK(err_code);
+                    }
                 }
             }
         }

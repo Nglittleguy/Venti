@@ -83,7 +83,7 @@ void delete_all_process(void)
 
 
 void setDayVoltageBuffer(char* flash_write_buf, uint32_t epoch) {
-    memset(flash_write_buf, 0, 36);
+    memset(flash_write_buf, 0, 8);
     uint16_t vbatt;
     battery_voltage_get(&vbatt);
 
@@ -92,12 +92,14 @@ void setDayVoltageBuffer(char* flash_write_buf, uint32_t epoch) {
         low_battery = true;
         rotate(255);
     }
-    sprintf(flash_write_buf, "Time: %d - %d mV", epoch, vbatt);
+    int day_write_buffer [2] = {epoch, vbatt};
+    memcpy(flash_write_buf, day_write_buffer, 8);
 }
 
 void setTemperatureBuffer(char* flash_write_temp, uint16_t segment) {
-    memset(flash_write_temp, 0, 36);
-    sprintf(flash_write_temp, "Segment %d: %d - %d", segment, temp_min, temp_max);
+    short temp_buffer [3] = {segment, temp_min, temp_max};
+    memset(flash_write_temp, 0, 6);
+    memcpy(flash_write_temp, temp_buffer, 6);
 }
 
 void setScheduleBuffer(char* flash_write_schedule, uint32_t current_epoch_sec) {
@@ -343,7 +345,7 @@ bool ds18b20_reset_and_check(void) {
 }
 
 float ds18b20_read_temp(void) {
-    return 8888;   //TESTING, PLEASE REMOVE
+    return 88;   //TESTING, PLEASE REMOVE
 
 
     char t1 = 0, t2 = 0;
