@@ -118,6 +118,7 @@ extern bool low_battery;
 
 void setDayVoltageBuffer(char* flash_write_buf, uint32_t epoch);
 void setTemperatureBuffer(char* flash_write_temp, uint16_t segment);
+void setScheduleBuffer(char* flash_write_schedule, uint32_t current_epoch_sec);
 
 /////////////////////////////////////////////////////////////////////////////////
 //UART (NUS) Services
@@ -222,6 +223,9 @@ static const char daysOfWeek[7][10] = {"Sunday", "Monday", "Tuesday", "Wednesday
     "Thursday", "Friday", "Saturday"};
 
 extern Schedule_event schedule[7][5];
+
+#define SCHEDULE_FLASH_ID       0xDDDD
+#define SCHEDULE_FLASH_KEY      0xDDDD
 
 void initSchedule();
 void printSchedule();

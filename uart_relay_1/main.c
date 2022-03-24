@@ -69,8 +69,9 @@ uint8_t return_buf[200] = {0};
 uint16_t return_len = 0;
 
 //Buffer to write to flash (asynchronous) must not be on stack
-static char flash_write_buf[32];
-static char flash_write_temp[32];
+static char flash_write_buf[64];
+static char flash_write_temp[64];
+static char flash_write_schedule[128];
 
 static void wait_for_fds_ready() {
     while(!m_fds_initialized) {
@@ -199,7 +200,6 @@ static void flash_storage_init() {
     }
 }
 
-
 static void record_read_file(uint16_t fileID, uint16_t recordKey, uint16_t conn_to_send, bool from_central) {
     NRF_LOG_INFO("Trying to read");
     fds_find_token_t tok   = {0};
@@ -275,15 +275,80 @@ static void record_write(uint32_t fid, uint32_t key, void const * p_data, uint32
     }
 }
 
+static void record_delete(uint32_t fid, uint32_t key)
+{
+    fds_find_token_t tok   = {0};
+    fds_record_desc_t desc = {0};
+
+    if (fds_record_find(fid, key, &desc, &tok) == NRF_SUCCESS)
+    {
+        ret_code_t rc = fds_record_delete(&desc);
+        if (rc != NRF_SUCCESS)
+        {
+            NRF_LOG_INFO("error: fds_record_delete() returned %s.\n", fds_err_str(rc));
+            return;
+        }
+        NRF_LOG_INFO("record id: 0x%x\n", desc.record_id);
+    }
+    else
+    {
+        NRF_LOG_INFO("error: record not found!\n");
+    }
+}
+
+
+static void fds_garbage_collection()
+{
+    ret_code_t rc = fds_gc();
+    switch (rc)
+    {
+        case NRF_SUCCESS:
+            break;
+
+        default:
+            NRF_LOG_INFO("error: garbage collection returned %s\n", fds_err_str(rc));
+            break;
+    }
+}
+
+static bool record_load_schedule() {
+    fds_find_token_t tok   = {0};
+    fds_record_desc_t desc = {0};
+    fds_flash_record_t rec;
+
+    while(fds_record_find(SCHEDULE_FLASH_ID, SCHEDULE_FLASH_KEY, &desc, &tok)==NRF_SUCCESS) {
+        if(fds_record_open(&desc, &rec)!=NRF_SUCCESS) {
+            NRF_LOG_INFO("Error in opening record");
+        }
+        
+        void* raw_data = (void *)rec.p_data;
+        //printf("Recorded Schedule: %s\n\r", raw_data);
+
+        memcpy(schedule, raw_data, sizeof(Schedule_event)*35);
+
+        return true;
+        
+        if(fds_record_close(&desc)!=NRF_SUCCESS) {
+            NRF_LOG_INFO("Error in closing record");
+        }
+    }
+    return false;
+}
+
+static void record_schedule() {
+    setScheduleBuffer(flash_write_schedule, current_epoch_sec);
+    record_write(SCHEDULE_FLASH_ID, SCHEDULE_FLASH_KEY, &flash_write_schedule, 128);
+}
+
 static void record_day_voltage() {
     dataFileID++;
     setDayVoltageBuffer(flash_write_buf, current_epoch_sec);
-    record_write(dataFileID, 0x0001, &flash_write_buf, 32);
+    record_write(dataFileID, 0x0001, &flash_write_buf, 64);
 }
 
 static void record_temp() {
     setTemperatureBuffer(flash_write_temp, current_time_segment);
-    record_write(dataFileID, 0x0002, &flash_write_temp, 32);
+    record_write(dataFileID, 0x0002, &flash_write_temp, 64);
 }
 
 static void print_all_cmd()
@@ -811,10 +876,10 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
     //    NRF_LOG_INFO("left");
     //    rotateCCWHalf();
     //}*/
-    //else if(strcmp(data_read, "r")==0) {
-    //    NRF_LOG_INFO("right");
-    //    rotateCWHalf();
-    //}
+    else if(strcmp(data_read, "r")==0) {
+        NRF_LOG_INFO("right");
+        rotateCWHalf();
+    }
     ////else if(strcmp(data_read, "read")==0) {
     ////    record_read();
     ////}
@@ -822,12 +887,12 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
     ////    record_day_voltage();
     ////}
 
-    ////Open The vent to an amount
-    //else if(strncmp(data_read, "open", 4)==0) {
-    //    uint8_t target = (uint8_t) atoi(data_read+5);
-    //    printf("Rotate to %d", target);
-    //    rotate(target);
-    //}
+    //Open The vent to an amount
+    else if(strncmp(data_read, "open", 4)==0) {
+        uint8_t target = (uint8_t) atoi(data_read+5);
+        printf("Rotate to %d", target);
+        rotate(target);
+    }
 
     ////Read the current temperature
     //else if(strcmp(data_read, "temp")==0) {
@@ -900,10 +965,10 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
         
     //}
 
-    //else if(strncmp(data_read, "r", 1)==0) {
-    //    uint8_t target = (uint8_t) atoi(data_read+2);
-    //    rotateCW(target);
-    //}
+    else if(strncmp(data_read, "r", 1)==0) {
+        uint8_t target = (uint8_t) atoi(data_read+2);
+        rotateCW(target);
+    }
 
     //else if(strncmp(data_read, "l", 1)==0) {
     //    uint8_t target = (uint8_t) atoi(data_read+2);
@@ -1060,6 +1125,18 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
                 }
                 setSchedule(weekday, timeArr, amountArr);
                 sprintf(return_buf, "00@%d@#", weekday+721);
+            }
+
+            //Request Saving the Entire Schedule into Flash
+            else if(instr_code == 750) {
+                record_schedule();
+                sprintf(return_buf, "00@755@#");
+            }
+
+            //Request Loading the Prior Schedule From Flash
+            else if(instr_code == 760) {
+                record_load_schedule();
+                sprintf(return_buf, "00@765@#");
             }
 
             //Request Initial Set Up of Time (500@DayOfWeek|Hour|Minute|Second|EpochTime#)
@@ -2017,10 +2094,10 @@ int main(void)
     // Initialize.
     log_init();
     timers_init();
-    leds_init(&erase_bonds);
+    //leds_init(&erase_bonds);
     power_management_init();
     ble_stack_init();
-//    //sd_power_dcdc_mode_set(NRF_POWER_DCDC_ENABLE);
+    //sd_power_dcdc_mode_set(NRF_POWER_DCDC_ENABLE);
     gap_params_init();
     gatt_init();
     uart_init();
@@ -2032,11 +2109,12 @@ int main(void)
     //print_all_cmd();
    
 
-//    // Start execution.
+    // Start execution.
     printf("My Test App Started.");
 
     advertising_start();
-    //app_nus_client_init();
+    app_nus_client_init();
+    
     
     // Enter main loop.
     for (;;)

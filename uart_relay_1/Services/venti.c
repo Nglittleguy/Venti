@@ -100,6 +100,11 @@ void setTemperatureBuffer(char* flash_write_temp, uint16_t segment) {
     sprintf(flash_write_temp, "Segment %d: %d - %d", segment, temp_min, temp_max);
 }
 
+void setScheduleBuffer(char* flash_write_schedule, uint32_t current_epoch_sec) {
+    memset(flash_write_schedule, 0, 128);
+    memcpy(flash_write_schedule, schedule, sizeof(Schedule_event)*35);
+}
+
 //////////////////////////////////////////////////////////////////////////////////
 //Motor Services
 bool lights = false;
