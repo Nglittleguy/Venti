@@ -33,59 +33,12 @@ const char *fds_err_str(ret_code_t ret)
     return err_str[ret - NRF_ERROR_FDS_ERR_BASE];
 }
 
-/**@brief   Begin deleting all records, one by one. */
-void delete_all_begin(void)
-{
-    m_delete_all.delete_next = true;
-}
-
-bool record_delete_next(void)
-{
-    fds_find_token_t  tok   = {0};
-    fds_record_desc_t desc  = {0};
-
-    if (fds_record_iterate(&desc, &tok) == NRF_SUCCESS)
-    {
-        ret_code_t rc = fds_record_delete(&desc);
-        if (rc != NRF_SUCCESS)
-        {
-            return false;
-        }
-
-        return true;
-    }
-    else
-    {
-        /* No records left to delete. */
-        return false;
-    }
-}
-
-/**@brief   Process a delete all command.
- *
- * Delete records, one by one, until no records are left.
- */
-void delete_all_process(void)
-{
-    if (   m_delete_all.delete_next
-        & !m_delete_all.pending)
-    {
-        NRF_LOG_INFO("Deleting next record.");
-
-        m_delete_all.delete_next = record_delete_next();
-        if (!m_delete_all.delete_next)
-        {
-            NRF_LOG_INFO("No records left to delete.");
-        }
-    }
-}
-
-
-
 void setDayVoltageBuffer(char* flash_write_buf, uint32_t epoch) {
     memset(flash_write_buf, 0, 8);
     uint16_t vbatt;
+    voltage_read_enable(true);
     battery_voltage_get(&vbatt);
+    voltage_read_enable(false);
 
     //If battery is less than 3.5V, then open motor, disallow closing
     if(vbatt < 3500) {
@@ -107,6 +60,16 @@ void setScheduleBuffer(char* flash_write_schedule, uint32_t current_epoch_sec) {
     memcpy(flash_write_schedule, schedule, sizeof(Schedule_event)*35);
 }
 
+void voltage_read_enable(bool connect) {
+    if(connect) {
+        nrf_gpio_pin_set(VOLTAGE_MOSFET_PIN);
+    }
+    else {
+        nrf_gpio_pin_clear(VOLTAGE_MOSFET_PIN);
+    }
+    nrf_delay_ms(10);
+}
+
 //////////////////////////////////////////////////////////////////////////////////
 //Motor Services
 bool lights = false;
@@ -124,6 +87,7 @@ void bsp_board_motor_init(void) {
     for(int i = 0; i<4; i++) {
         nrf_gpio_cfg_output(motor_pins[i]);
     }
+    nrf_gpio_cfg_output(VOLTAGE_MOSFET_PIN);
 }
 
 void reset_motor() {

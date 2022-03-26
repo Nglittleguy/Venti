@@ -297,6 +297,52 @@ static void record_delete(uint32_t fid, uint32_t key)
     }
 }
 
+/**@brief   Begin deleting all records, one by one. */
+void delete_all_begin(void)
+{
+    m_delete_all.delete_next = true;
+}
+
+bool record_delete_next(void)
+{
+    fds_find_token_t  tok   = {0};
+    fds_record_desc_t desc  = {0};
+
+    if (fds_record_iterate(&desc, &tok) == NRF_SUCCESS)
+    {
+        ret_code_t rc = fds_record_delete(&desc);
+        if (rc != NRF_SUCCESS)
+        {
+            return false;
+        }
+
+        return true;
+    }
+    else
+    {
+        /* No records left to delete. */
+        return false;
+    }
+}
+
+/**@brief   Process a delete all command.
+ *
+ * Delete records, one by one, until no records are left.
+ */
+void delete_all_process(void)
+{
+    if (   m_delete_all.delete_next
+        & !m_delete_all.pending)
+    {
+        NRF_LOG_INFO("Deleting next record.");
+
+        m_delete_all.delete_next = record_delete_next();
+        if (!m_delete_all.delete_next)
+        {
+            NRF_LOG_CYAN("No records left to delete.");
+        }
+    }
+}
 
 static void fds_garbage_collection()
 {
@@ -596,7 +642,9 @@ static void battery_level_update(void)
 
     uint8_t   battery_level;
     uint16_t  vbatt;
+    voltage_read_enable(true);
     battery_voltage_get(&vbatt);
+    voltage_read_enable(false);
 
     battery_level = battery_level_in_percent(vbatt);
     printf("ADC result %d, in percent: %d\r\n", vbatt, battery_level);
@@ -695,7 +743,7 @@ static void relay(char* msg) {
     if(m_ble_nus_c.conn_handle!= BLE_CONN_HANDLE_INVALID) {
         //NRF_LOG_INFO("Sending: %s", msg);
         uint8_t msg_len = strlen(msg);
-        //NRF_LOG_INFO("Sending Length: %d", msg_len);
+        //NRF_LOG_INFO("Sending Length: %d", msdeg_len);
         ret_code_t ret_val = ble_nus_c_string_send(&m_ble_nus_c, msg, msg_len);
         
         if ( (ret_val != NRF_ERROR_INVALID_STATE) && (ret_val != NRF_ERROR_RESOURCES) )
@@ -1225,7 +1273,9 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
             //Request Battery Voltage (returns id@515@voltage_in_mV#)
             else if(instr_code == 510) {
                 uint16_t vbatt;
+                voltage_read_enable(true);
                 battery_voltage_get(&vbatt);
+                voltage_read_enable(false);
 
                 //Low Battery (returns id@520@voltage_in_mV#)
                 if(vbatt<4000 && !low_battery) {
@@ -1308,6 +1358,16 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
             //Request Last Day of File ID
             else if(instr_code == 910) {
                 sprintf(return_buf, "00@915@%d#", dataFileID);
+            }
+
+            //Set the File ID day
+            else if(instr_code == 930) {
+                ptr = strtok(NULL, "#");
+                if (ptr!=NULL) {
+                    dataFileID = atoi(ptr)-1;
+                    record_day_voltage();
+                }
+                sprintf(return_buf, "00@935@#");
             }
 
             //Request Read of Flash File Temperature

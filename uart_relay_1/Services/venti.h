@@ -108,14 +108,14 @@ static fds_record_t const m_dummy_record =
     .data.length_words = (sizeof(m_dummy_cfg) + 3) / sizeof(uint32_t),
 };
 
-void delete_all_begin(void);
-bool record_delete_next(void);
-void delete_all_process(void);
 
 const char *fds_err_str(ret_code_t ret);
 
 extern bool low_battery;
 
+#define VOLTAGE_MOSFET_PIN    17
+
+void voltage_read_enable(bool connect);
 void setDayVoltageBuffer(char* flash_write_buf, uint32_t epoch);
 void setTemperatureBuffer(char* flash_write_temp, uint16_t segment);
 void setScheduleBuffer(char* flash_write_schedule, uint32_t current_epoch_sec);
