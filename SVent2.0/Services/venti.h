@@ -30,7 +30,7 @@
 //Battery Services
 
 #include "boards.h"
-#include "Services/battery_voltage.h"
+#include "../../Services/battery_voltage.h"
 #define VOLTAGE_MOSFET_PIN    29
 //Change the Battery Voltage SAADC Pin:
 //  'Services/battery_voltage_saadc.c' line 80
