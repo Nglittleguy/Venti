@@ -38,7 +38,7 @@
  *
  */
 
- #include <stdbool.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
@@ -479,7 +479,7 @@ static void record_read_day(uint16_t fileID, uint16_t conn_to_send, bool from_ce
         bufferIndex += i;
 
         //Add a \n for easier reading and parsing
-        data_flash_send_to_phone[bufferIndex] = '\n';
+        data_flash_send_to_phone[bufferIndex] = '#';
         bufferIndex++;
 
 
@@ -564,14 +564,16 @@ static void record_read_temp(uint16_t fileID, uint16_t conn_to_send, bool from_c
         data_flash_send_to_phone[bufferIndex] = '\n';
         bufferIndex++;
 
-
         if(fds_record_close(&desc)!=NRF_SUCCESS) {
             NRF_LOG_INFO("Error in closing record");
         }
     }
 
-    NRF_LOG_INFO("Sent: %s\n\r", data_flash_send_to_phone);
+    //Add a # for end
+    data_flash_send_to_phone[bufferIndex] = '#';
+    bufferIndex++;
 
+    NRF_LOG_INFO("Sent: %s\n\r", data_flash_send_to_phone);
     ret_code_t err_code;
 
     //Send to Central
@@ -594,7 +596,6 @@ static void record_read_temp(uint16_t fileID, uint16_t conn_to_send, bool from_c
             }
         }
     }
-    
 }
 
 /**@brief Function to record the temperature into flash storage
@@ -739,7 +740,7 @@ static void time_segment_timeout_handler(void *p_context)
  * @param[in]   msg           String to be sent to the central connection
  */
 static void relay(char* msg) {
-    if(m_ble_nus_c.conn_handle!= BLE_CONN_HANDLE_INVALID) {
+    if(m_ble_nus_c.conn_handle!= BLE_CONN_HANDLE_INVALID && m_ble_nus_c.conn_handle!= 0) {
 
         uint8_t msg_len = strlen(msg);
         ret_code_t ret_val = ble_nus_c_string_send(&m_ble_nus_c, msg, msg_len);
@@ -878,25 +879,6 @@ void uart_event_handle(app_uart_evt_t * p_event)
         case APP_UART_DATA_READY:
             UNUSED_VARIABLE(app_uart_get(&data_array[index]));
             index++;
-
-            if ((data_array[index - 1] == '\n') ||
-                (data_array[index - 1] == '\r') ||
-                (index >= (m_ble_nus_max_data_len)))
-            {
-                NRF_LOG_DEBUG("Ready to send data over BLE NUS");
-                NRF_LOG_HEXDUMP_DEBUG(data_array, index);
-
-                do
-                {
-                    ret_val = ble_nus_c_string_send(&m_ble_nus_c, data_array, index);
-                    if ( (ret_val != NRF_ERROR_INVALID_STATE) && (ret_val != NRF_ERROR_RESOURCES) )
-                    {
-                        APP_ERROR_CHECK(ret_val);
-                    }
-                } while (ret_val == NRF_ERROR_RESOURCES);
-
-                index = 0;
-            }
             break;
 
         /**@snippet [Handling data from UART] */
@@ -991,6 +973,7 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
     else if(data_read[2]=='@' && data_read[6]=='@') {
         memset(data_read_buf, 0, 200);
         memcpy(data_read_buf, data_read, 200);
+        NRF_LOG_INFO("Received: %s", data_read_buf);
         char *ptr = strtok(data_read, "@");
         uint8_t recipientID = atoi(ptr);
 
@@ -1081,7 +1064,6 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
                 else {
                     sprintf(return_buf, "00@505@INVALID#");
                 }
-
             }
 
             //Request Current Time Segment & Epoch Time
@@ -1089,6 +1071,18 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
                 char dateTime[50] = {0};
                 currentTimeFromSegment(dateTime, current_time_segment);
                 sprintf(return_buf, "00@508@%d|%s|%d#", current_time_segment, dateTime, current_epoch_sec);
+            }
+
+            //Set Current Time Segment
+            else if(instr_code == 503) {
+                ptr = strtok(NULL, "#");
+                if (ptr!=NULL) {
+                    uint16_t newTimeSegment = atoi(ptr);
+                    if(newTimeSegment<2016) {
+                        current_time_segment = newTimeSegment;
+                    }
+                }
+                sprintf(return_buf, "00@504@%d#", current_time_segment);
             }
 
             //Request Battery Voltage (returns id@515@voltage_in_mV#)
@@ -1231,7 +1225,6 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
                 sprintf(return_buf, "00@995@#");
             }
 
-            
 
             // END INSTRUCTION HANDLING ----------------------------------
             
@@ -1939,8 +1932,7 @@ void app_nus_client_init()
  */
 int main(void)
 {
-    bool erase_bonds;
-
+	
     log_init();
     timers_init();
     power_management_init();
