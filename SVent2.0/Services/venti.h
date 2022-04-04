@@ -4,7 +4,7 @@
 //////////////////////////////////////////////////////////////////////////////////
 //Relaying Services
 
-#define DEVICE_ID     1                 /**< ID of Device for Relaying. */
+#define DEVICE_ID     3                 /**< ID of Device for Relaying. */
 
 #if DEVICE_ID == 1
 #define DEVICE_NAME   "S-Vent 1"        /**< Name of device. Will be included in the advertising data. */
@@ -30,7 +30,7 @@
 //Battery Services
 
 #include "boards.h"
-#include "../../Services/battery_voltage.h"
+#include "battery_voltage.h"
 #define VOLTAGE_MOSFET_PIN    29
 //Change the Battery Voltage SAADC Pin:
 //  'Services/battery_voltage_saadc.c' line 80
@@ -147,7 +147,7 @@ NRF_BLE_SCAN_DEF(m_scan);                                               /**< Sca
 #define STEPDELAY 10
 #define MOTORBASEPIN 11             //Deprecated, use motor_pins instead
 
-static const uint8_t motor_pins[4] = {15, 17, 19, 31};
+static const uint8_t motor_pins[4] = {11, 12, 13, 14};//{15, 17, 19, 31};
 static const bool motor_reset[4] = {1,0,0,1};
 
 static const bool cw_seq[4][4] = {
@@ -179,7 +179,7 @@ uint8_t getOpenAmount();
 /////////////////////////////////////////////////////////////////////////////////
 //Temperature Sensor - https://github.com/DSysoletin/nrf52_ds18b20_example/blob/master/main.c
 
-#define DS18B20PIN 9
+#define DS18B20PIN 16
 #define TEMP_SENSOR_INVALID 1      //Set to 1 if no temperature sensor attached, 0 if attached
 
 void ds18b20_send(char bit);
@@ -222,7 +222,7 @@ void setSchedule(uint8_t weekday, uint16_t* timeArr, uint8_t* amountArr);
 //Timer For Events (Set SEGMENT_INTERVAL to ms of 5 min, 300000)
 
 #include "limits.h"
-#define SEGMENT_INTERVAL              APP_TIMER_TICKS(30000)  //300000
+#define SEGMENT_INTERVAL              APP_TIMER_TICKS(5000)  //300000
 
 void resetTemperatureMinMax();
 void compareTemperatureMinMax();

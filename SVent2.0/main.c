@@ -689,6 +689,12 @@ void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
 static void start_timeout_handler(void *p_context) {
     UNUSED_PARAMETER(p_context);
     application_timers_start();
+    NRF_LOG_INFO("Starting Time Segments");
+}
+
+static void stop_app_timer() {
+    uint32_t err_code = app_timer_stop(m_time_segment_id);
+    APP_ERROR_CHECK(err_code);
 }
 
 /**@brief Function to handle the time segment timer
@@ -740,8 +746,10 @@ static void time_segment_timeout_handler(void *p_context)
  * @param[in]   msg           String to be sent to the central connection
  */
 static void relay(char* msg) {
-    if(m_ble_nus_c.conn_handle!= BLE_CONN_HANDLE_INVALID && m_ble_nus_c.conn_handle!= 0) {
+    NRF_LOG_INFO("Relaying To Central 1");
+    if(m_ble_nus_c.conn_handle != BLE_CONN_HANDLE_INVALID) {
 
+        NRF_LOG_INFO("Relaying To Central 2");
         uint8_t msg_len = strlen(msg);
         ret_code_t ret_val = ble_nus_c_string_send(&m_ble_nus_c, msg, msg_len);
         
@@ -907,8 +915,6 @@ static void uart_init(void)
     {
         .rx_pin_no    = RX_PIN_NUMBER,
         .tx_pin_no    = TX_PIN_NUMBER,
-        .rts_pin_no   = RTS_PIN_NUMBER,
-        .cts_pin_no   = CTS_PIN_NUMBER,
         .flow_control = APP_UART_FLOW_CONTROL_DISABLED,
         .use_parity   = false,
 #if defined (UART_PRESENT)
@@ -917,6 +923,7 @@ static void uart_init(void)
         .baud_rate    = NRF_UARTE_BAUDRATE_115200
 #endif
     };
+
 
     APP_UART_FIFO_INIT(&comm_params,
                        UART_RX_BUF_SIZE,
@@ -929,6 +936,7 @@ static void uart_init(void)
     //Turn off UART pins (don't actually need output)
     NRF_UART0->TASKS_STOPRX=1;
     NRF_UART0->TASKS_STOPTX=1;
+    
 }
 /**@snippet [UART Initialization] */
 
@@ -1054,7 +1062,7 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
                     char dateTime[50] = {0};
                     currentTimeFromSegment(dateTime, current_time_segment);
                     NRF_LOG_INFO("Current Time Segment Set To %s, Epoch time: %d, Next Start in %d Seconds", dateTime, current_epoch_sec, seconds_to_next_segment);
-
+    
                     err_code = app_timer_start(m_start_id, APP_TIMER_TICKS(seconds_to_next_segment*1000), NULL);
                     APP_ERROR_CHECK(err_code);
 
@@ -1064,6 +1072,12 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
                 else {
                     sprintf(return_buf, "00@505@INVALID#");
                 }
+            }
+
+            //Request Stop App Timer for Re-Sync
+            else if(instr_code == 501) {
+                stop_app_timer();
+                sprintf(return_buf, "00@502@#");
             }
 
             //Request Current Time Segment & Epoch Time
@@ -1119,15 +1133,15 @@ static void msg_received(const uint8_t* data_in, uint16_t data_len, uint16_t con
 
             //Request Open Vent to Amount (returns id@625#) - would recommend sending back amount as well 
             else if(instr_code == 620) {
-                if(low_battery) {
-                    sprintf(return_buf, "00@625@LOW#");
-                }
-                else {
+                //if(low_battery) {
+                //    sprintf(return_buf, "00@625@LOW#");
+                //}
+                //else {
                     ptr = strtok(NULL, "#");
                     uint8_t target_open = atoi(ptr);
                     rotate(target_open);
                     sprintf(return_buf, "00@625@#");
-                }
+                //}
             }
 
             //Request Schedules per Weekday (returns id@instr_code@time_segment|amount,time_segment|amount...#)
@@ -1293,8 +1307,6 @@ static void services_init(void)
         err_code = nrf_ble_qwr_init(&m_qwr[i], &qwr_init);
         APP_ERROR_CHECK(err_code);
     }
-
-    APP_ERROR_CHECK(err_code);
 
 
     battery_voltage_init();

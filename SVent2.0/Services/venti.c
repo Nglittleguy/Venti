@@ -403,6 +403,7 @@ float ds18b20_read_temp(void) {
         return 88;
     }
 
+    NRF_LOG_INFO("Reading Temp");
     char t1 = 0, t2 = 0;
     double f;
     uint8_t scratchPad[9];
